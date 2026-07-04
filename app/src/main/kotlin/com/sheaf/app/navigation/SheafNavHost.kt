@@ -7,11 +7,13 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import com.sheaf.app.onboarding.OnboardingScreen
 import com.sheaf.app.settings.SettingsScreen
 import com.sheaf.feature.reader.ReaderScreen
 import com.sheaf.feature.reader.library.LibraryScreen
 
 object Routes {
+    const val ONBOARDING = "onboarding"
     const val LIBRARY = "library"
     const val SETTINGS = "settings"
     const val READER = "reader/{documentId}"
@@ -21,13 +23,23 @@ object Routes {
 @Composable
 fun SheafNavHost(
     navController: NavHostController,
+    startDestination: String = Routes.LIBRARY,
     modifier: Modifier = Modifier,
 ) {
     NavHost(
         navController = navController,
-        startDestination = Routes.LIBRARY,
+        startDestination = startDestination,
         modifier = modifier,
     ) {
+        composable(Routes.ONBOARDING) {
+            OnboardingScreen(
+                onDone = {
+                    navController.navigate(Routes.LIBRARY) {
+                        popUpTo(Routes.ONBOARDING) { inclusive = true }
+                    }
+                },
+            )
+        }
         composable(Routes.LIBRARY) {
             LibraryScreen(
                 onOpenDocument = { id -> navController.navigate(Routes.reader(id)) },

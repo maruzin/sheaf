@@ -20,6 +20,9 @@ class DataStoreSettingsRepository @Inject constructor(
     override val defaultReaderTheme: Flow<String> =
         dataStore.data.map { it[KEY_READER_THEME] ?: "System" }
 
+    override val onboardingComplete: Flow<Boolean> =
+        dataStore.data.map { it[KEY_ONBOARDING] ?: false }
+
     override suspend fun setDynamicColor(enabled: Boolean) {
         dataStore.edit { it[KEY_DYNAMIC] = enabled }
     }
@@ -28,8 +31,13 @@ class DataStoreSettingsRepository @Inject constructor(
         dataStore.edit { it[KEY_READER_THEME] = theme }
     }
 
+    override suspend fun setOnboardingComplete(complete: Boolean) {
+        dataStore.edit { it[KEY_ONBOARDING] = complete }
+    }
+
     private companion object {
         val KEY_DYNAMIC = booleanPreferencesKey("dynamic_color")
         val KEY_READER_THEME = stringPreferencesKey("default_reader_theme")
+        val KEY_ONBOARDING = booleanPreferencesKey("onboarding_complete")
     }
 }

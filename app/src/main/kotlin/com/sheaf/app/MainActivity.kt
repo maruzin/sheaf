@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.rememberNavController
+import com.sheaf.app.navigation.Routes
 import com.sheaf.app.navigation.SheafNavHost
 import com.sheaf.core.ui.theme.SheafTheme
 import dagger.hilt.android.AndroidEntryPoint
@@ -26,12 +27,15 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun SheafApp(appViewModel: AppViewModel = hiltViewModel()) {
-    val dynamicColor by appViewModel.dynamicColor.collectAsStateWithLifecycle()
-    SheafTheme(dynamicColor = dynamicColor) {
-        val navController = rememberNavController()
-        SheafNavHost(
-            navController = navController,
-            modifier = Modifier.fillMaxSize(),
-        )
+    val state by appViewModel.state.collectAsStateWithLifecycle()
+    SheafTheme(dynamicColor = state.dynamicColor) {
+        if (!state.loading) {
+            val navController = rememberNavController()
+            SheafNavHost(
+                navController = navController,
+                startDestination = if (state.onboardingDone) Routes.LIBRARY else Routes.ONBOARDING,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
     }
 }
