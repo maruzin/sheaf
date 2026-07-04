@@ -7,11 +7,13 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import com.sheaf.app.settings.SettingsScreen
 import com.sheaf.feature.reader.ReaderScreen
 import com.sheaf.feature.reader.library.LibraryScreen
 
 object Routes {
     const val LIBRARY = "library"
+    const val SETTINGS = "settings"
     const val READER = "reader/{documentId}"
     fun reader(documentId: Long) = "reader/$documentId"
 }
@@ -29,7 +31,11 @@ fun SheafNavHost(
         composable(Routes.LIBRARY) {
             LibraryScreen(
                 onOpenDocument = { id -> navController.navigate(Routes.reader(id)) },
+                onOpenSettings = { navController.navigate(Routes.SETTINGS) },
             )
+        }
+        composable(Routes.SETTINGS) {
+            SettingsScreen(onBack = { navController.popBackStack() })
         }
         composable(
             route = Routes.READER,
