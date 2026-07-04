@@ -30,6 +30,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -78,6 +79,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sheaf.core.domain.model.Annotation
+import com.sheaf.core.domain.model.AnnotationType
 import com.sheaf.core.domain.model.NormPoint
 import com.sheaf.feature.reader.print.printPdf
 import kotlin.math.roundToInt
@@ -185,6 +187,8 @@ fun ReaderScreen(
                 if (state.annotating) {
                     InkToolbar(
                         selected = state.inkColorArgb,
+                        highlighter = state.highlighter,
+                        onTool = { viewModel.onEvent(ReaderEvent.SetHighlighter(it)) },
                         onColor = { viewModel.onEvent(ReaderEvent.SetInkColor(it)) },
                         onClearPage = { viewModel.clearPageAnnotations(state.currentPage) },
                     )
@@ -205,6 +209,7 @@ fun ReaderScreen(
                     pageCount = state.pageCount,
                     zoom = zoom,
                     annotating = state.annotating,
+                    highlighter = state.highlighter,
                     inkColor = Color(state.inkColorArgb),
                     annotationsByPage = state.annotationsByPage,
                     onZoom = { factor -> zoom = (zoom * factor).coerceIn(1f, 5f) },
@@ -251,12 +256,34 @@ fun ReaderScreen(
 }
 
 @Composable
-private fun InkToolbar(selected: Int, onColor: (Int) -> Unit, onClearPage: () -> Unit) {
+private fun InkToolbar(
+    selected: Int,
+    highlighter: Boolean,
+    onTool: (Boolean) -> Unit,
+    onColor: (Int) -> Unit,
+    onClearPage: () -> Unit,
+) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        IconButton(onClick = { onTool(false) }) {
+            Icon(
+                Icons.Filled.Draw,
+                contentDescription = "Pen",
+                tint = if (!highlighter) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        IconButton(onClick = { onTool(true) }) {
+            Icon(
+                Icons.Filled.Brush,
+                contentDescription = "Highlighter",
+                tint = if (highlighter) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         InkColors.forEach { argb ->
             val c = Color(argb)
             Box(
@@ -333,6 +360,7 @@ private fun PageList(
     pageCount: Int,
     zoom: Float,
     annotating: Boolean,
+    highlighter: Boolean,
     inkColor: Color,
     annotationsByPage: Map<Int, List<Annotation>>,
     onZoom: (Float) -> Unit,
@@ -357,6 +385,7 @@ private fun PageList(
                 zoom = zoom,
                 aspectRatio = aspectRatioOf(index),
                 annotating = annotating,
+                highlighter = highlighter,
                 inkColor = inkColor,
                 savedStrokes = annotationsByPage[index].orEmpty(),
                 onStroke = { pts -> onStroke(index, pts) },
@@ -372,6 +401,7 @@ private fun PdfPageItem(
     zoom: Float,
     aspectRatio: Float,
     annotating: Boolean,
+    highlighter: Boolean,
     inkColor: Color,
     savedStrokes: List<Annotation>,
     onStroke: (List<NormPoint>) -> Unit,
@@ -423,16 +453,25 @@ private fun PdfPageItem(
                 }
             },
         ) {
-            savedStrokes.forEach { ann -> drawInk(ann.points, Color(ann.colorArgb), ann.strokeWidth) }
+            savedStrokes.forEach { ann ->
+                val base = Color(ann.colorArgb)
+                val c = if (ann.type == AnnotationType.Highlight) base.copy(alpha = 0.30f) else base
+                drawInk(ann.points, c, ann.strokeWidth)
+            }
             if (live.size >= 2) {
                 val path = Path().apply {
                     moveTo(live[0].x, live[0].y)
                     for (i in 1 until live.size) lineTo(live[i].x, live[i].y)
                 }
+                val widthFrac = if (highlighter) 0.02f else 0.004f
+                val liveColor = if (highlighter) inkColor.copy(alpha = 0.30f) else inkColor
                 drawPath(
                     path = path,
-                    color = inkColor,
-                    style = Stroke(width = (0.004f * size.width).coerceAtLeast(2f), cap = StrokeCap.Round),
+                    color = liveColor,
+                    style = Stroke(
+                        width = (widthFrac * size.width).coerceAtLeast(2f),
+                        cap = if (highlighter) StrokeCap.Square else StrokeCap.Round,
+                    ),
                 )
             }
         }

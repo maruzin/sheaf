@@ -43,6 +43,7 @@ class ReaderViewModel @Inject constructor(
             is ReaderEvent.SetTheme -> _state.update { it.copy(theme = event.theme) }
             ReaderEvent.ToggleAnnotate -> _state.update { it.copy(annotating = !it.annotating) }
             is ReaderEvent.SetInkColor -> _state.update { it.copy(inkColorArgb = event.argb) }
+            is ReaderEvent.SetHighlighter -> _state.update { it.copy(highlighter = event.on) }
             ReaderEvent.ToggleOutline -> _state.update { it.copy(outlineVisible = !it.outlineVisible) }
             ReaderEvent.ToggleSearch -> _state.update {
                 if (it.searchActive) it.copy(searchActive = false, searchResults = emptyList(), searchQuery = "")
@@ -139,13 +140,14 @@ class ReaderViewModel @Inject constructor(
         val id = _state.value.documentId ?: return
         if (points.size < 2) return
         viewModelScope.launch {
+            val hi = _state.value.highlighter
             annotationRepo.upsert(
                 Annotation(
                     documentId = id,
                     pageIndex = pageIndex,
-                    type = AnnotationType.Ink,
+                    type = if (hi) AnnotationType.Highlight else AnnotationType.Ink,
                     colorArgb = _state.value.inkColorArgb,
-                    strokeWidth = 0.004f,
+                    strokeWidth = if (hi) 0.02f else 0.004f,
                     points = points,
                 ),
             )

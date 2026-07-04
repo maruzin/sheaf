@@ -4,6 +4,10 @@ Running engineering log. Newest first. Every non-obvious decision gets one line 
 
 ---
 
+## M3 — Annotations (in progress, 2026-07-04)
+- **Ink drawing GREEN on CI.** `Annotation` model (page-normalized 0..1 coords, zoom-independent), Room `annotations` table (DB v2, destructive migration for dev), `AnnotationRepository`. Reader: Draw toggle + colour palette + clear-page; strokes persist and redraw. Pinch-zoom suspended while annotating.
+- Next: highlight (translucent wide stroke), sticky notes (tap-to-place + edit), signatures (draw/save/reuse), AcroForm form fill.
+
 ## M2 — Design system + app shell (2026-07-04)
 
 ### Visual direction chosen: **Ember** (of 4 proposed to Dean)
