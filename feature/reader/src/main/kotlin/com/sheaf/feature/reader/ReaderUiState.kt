@@ -2,6 +2,7 @@ package com.sheaf.feature.reader
 
 import com.sheaf.core.domain.model.Annotation
 import com.sheaf.core.domain.model.OutlineEntry
+import com.sheaf.core.domain.model.NormPoint
 import com.sheaf.core.domain.model.SearchHit
 
 /** Immutable UI state for the reader screen (unidirectional data flow per Android Stack). */
@@ -28,6 +29,9 @@ data class ReaderUiState(
     val inkColorArgb: Int = 0xFFE4713B.toInt(),
     val highlighter: Boolean = false,
     val noteMode: Boolean = false,
+    val signatureMode: Boolean = false,
+    val hasSignature: Boolean = false,
+    val signaturePoints: List<NormPoint> = emptyList(),
     val annotationsListVisible: Boolean = false,
     val annotationsByPage: Map<Int, List<Annotation>> = emptyMap(),
     // One-shot page the UI should scroll to (consumed via ConsumeScroll)
@@ -52,6 +56,7 @@ sealed interface ReaderEvent {
     data class SetInkColor(val argb: Int) : ReaderEvent
     data class SetHighlighter(val on: Boolean) : ReaderEvent
     data class SetNoteMode(val on: Boolean) : ReaderEvent
+    data class SetSignatureMode(val on: Boolean) : ReaderEvent
     data object ConsumeScroll : ReaderEvent
     data class JumpTo(val page: Int) : ReaderEvent
 }

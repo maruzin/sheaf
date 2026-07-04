@@ -9,6 +9,7 @@ import com.sheaf.core.domain.model.NormPoint
 import com.sheaf.core.domain.model.ReadingPosition
 import com.sheaf.core.domain.repository.AnnotationRepository
 import com.sheaf.core.domain.repository.DocumentRepository
+import com.sheaf.core.domain.repository.SettingsRepository
 import com.sheaf.feature.reader.render.PdfRenderSource
 import com.sheaf.feature.reader.render.PdfRenderSourceFactory
 import com.sheaf.feature.reader.search.PdfOutlineExtractor
@@ -28,12 +29,22 @@ class ReaderViewModel @Inject constructor(
     private val searcher: PdfTextSearcher,
     private val outlineExtractor: PdfOutlineExtractor,
     private val annotationRepo: AnnotationRepository,
+    private val settings: SettingsRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ReaderUiState())
     val state: StateFlow<ReaderUiState> = _state.asStateFlow()
 
     private var source: PdfRenderSource? = null
+
+    init {
+        viewModelScope.launch {
+            settings.signature.collect { enc ->
+                val pts = decodePoints(enc)
+                _state.update { it.copy(signaturePoints = pts, hasSignature = pts.isNotEmpty()) }
+            }
+        }
+    }
 
     fun onEvent(event: ReaderEvent) {
         when (event) {
@@ -43,8 +54,9 @@ class ReaderViewModel @Inject constructor(
             is ReaderEvent.SetTheme -> _state.update { it.copy(theme = event.theme) }
             ReaderEvent.ToggleAnnotate -> _state.update { it.copy(annotating = !it.annotating) }
             is ReaderEvent.SetInkColor -> _state.update { it.copy(inkColorArgb = event.argb) }
-            is ReaderEvent.SetHighlighter -> _state.update { it.copy(highlighter = event.on, noteMode = false) }
-            is ReaderEvent.SetNoteMode -> _state.update { it.copy(noteMode = event.on) }
+            is ReaderEvent.SetHighlighter -> _state.update { it.copy(highlighter = event.on, noteMode = false, signatureMode = false) }
+            is ReaderEvent.SetNoteMode -> _state.update { it.copy(noteMode = event.on, signatureMode = false) }
+            is ReaderEvent.SetSignatureMode -> _state.update { it.copy(signatureMode = event.on, noteMode = false) }
             ReaderEvent.ToggleOutline -> _state.update { it.copy(outlineVisible = !it.outlineVisible) }
             ReaderEvent.ToggleAnnotationsList -> _state.update { it.copy(annotationsListVisible = !it.annotationsListVisible) }
             ReaderEvent.ToggleSearch -> _state.update {
@@ -189,6 +201,49 @@ class ReaderViewModel @Inject constructor(
     fun deleteAnnotation(id: Long) {
         viewModelScope.launch { annotationRepo.delete(id) }
     }
+
+    fun saveSignature(points: List<NormPoint>) {
+        if (points.size < 2) return
+        viewModelScope.launch { settings.setSignature(encodePoints(points)) }
+    }
+
+    /** Stamp the saved signature centered at [at] on [pageIndex], in a fixed-size box. */
+    fun stampSignature(pageIndex: Int, at: NormPoint) {
+        val id = _state.value.documentId ?: return
+        val sig = _state.value.signaturePoints
+        if (sig.size < 2) return
+        val boxW = 0.4f
+        val boxH = 0.16f
+        val mapped = sig.map { p ->
+            NormPoint(
+                x = (at.x - boxW / 2f + p.x * boxW).coerceIn(0f, 1f),
+                y = (at.y - boxH / 2f + p.y * boxH).coerceIn(0f, 1f),
+            )
+        }
+        viewModelScope.launch {
+            annotationRepo.upsert(
+                Annotation(
+                    documentId = id,
+                    pageIndex = pageIndex,
+                    type = AnnotationType.Ink,
+                    colorArgb = 0xFF15171C.toInt(),
+                    strokeWidth = 0.003f,
+                    points = mapped,
+                ),
+            )
+        }
+    }
+
+    private fun encodePoints(points: List<NormPoint>): String =
+        points.joinToString(";") { "${it.x},${it.y}" }
+
+    private fun decodePoints(s: String): List<NormPoint> =
+        if (s.isBlank()) emptyList() else s.split(";").mapNotNull { p ->
+            val c = p.split(",")
+            val x = c.getOrNull(0)?.toFloatOrNull()
+            val y = c.getOrNull(1)?.toFloatOrNull()
+            if (x != null && y != null) NormPoint(x, y) else null
+        }
 
     /** Renders a page bitmap for the UI. Returns null if the source isn't ready or render fails. */
     suspend fun renderPage(pageIndex: Int, widthPx: Int, heightPx: Int): Bitmap? =

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -26,6 +27,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -33,6 +35,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Draw
+import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -123,6 +126,7 @@ fun ReaderScreen(
 
     var zoom by remember { mutableFloatStateOf(1f) }
     var menuOpen by remember { mutableStateOf(false) }
+    var showSignatureCapture by remember { mutableStateOf(false) }
     var pendingNote by remember { mutableStateOf<Pair<Int, NormPoint>?>(null) }
     var editingNote by remember { mutableStateOf<Annotation?>(null) }
 
@@ -202,8 +206,14 @@ fun ReaderScreen(
                         selected = state.inkColorArgb,
                         highlighter = state.highlighter,
                         noteMode = state.noteMode,
+                        signatureMode = state.signatureMode,
                         onTool = { viewModel.onEvent(ReaderEvent.SetHighlighter(it)) },
                         onNote = { viewModel.onEvent(ReaderEvent.SetNoteMode(true)) },
+                        onSignature = {
+                            if (state.hasSignature) viewModel.onEvent(ReaderEvent.SetSignatureMode(true))
+                            else showSignatureCapture = true
+                        },
+                        onRedraw = { showSignatureCapture = true },
                         onColor = { viewModel.onEvent(ReaderEvent.SetInkColor(it)) },
                         onClearPage = { viewModel.clearPageAnnotations(state.currentPage) },
                     )
@@ -232,6 +242,8 @@ fun ReaderScreen(
                     onStroke = { page, pts -> viewModel.saveStroke(page, pts) },
                     onTapNote = { page, pt -> pendingNote = page to pt },
                     onEditNote = { ann -> editingNote = ann },
+                    signatureMode = state.signatureMode,
+                    onStampSignature = { page, pt -> viewModel.stampSignature(page, pt) },
                     aspectRatioOf = viewModel::aspectRatio,
                     renderPage = { i, w, h -> viewModel.renderPage(i, w, h) },
                     listState = listState,
@@ -311,12 +323,63 @@ fun ReaderScreen(
         }
     }
 
+    if (showSignatureCapture) {
+        SignatureCaptureDialog(
+            onDismiss = { showSignatureCapture = false },
+            onSave = { pts ->
+                viewModel.saveSignature(pts)
+                showSignatureCapture = false
+                viewModel.onEvent(ReaderEvent.SetSignatureMode(true))
+            },
+        )
+    }
+
     pendingNote?.let { (page, pt) ->
         NoteDialog("",  { pendingNote = null }, { t -> viewModel.saveNote(page, pt, t); pendingNote = null }, null)
     }
     editingNote?.let { ann ->
         NoteDialog(ann.note.orEmpty(), { editingNote = null }, { t -> viewModel.updateNote(ann, t); editingNote = null }, { viewModel.deleteAnnotation(ann.id); editingNote = null })
     }
+}
+
+@Composable
+private fun SignatureCaptureDialog(onDismiss: () -> Unit, onSave: (List<NormPoint>) -> Unit) {
+    val pts = remember { mutableStateListOf<NormPoint>() }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Draw your signature") },
+        text = {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(150.dp)
+                    .background(Color.White, RoundedCornerShape(8.dp)),
+            ) {
+                Canvas(
+                    Modifier.matchParentSize().pointerInput(Unit) {
+                        detectDragGestures(
+                            onDragStart = { o ->
+                                pts.clear()
+                                pts.add(NormPoint(o.x / size.width.toFloat(), o.y / size.height.toFloat()))
+                            },
+                            onDrag = { c, _ ->
+                                pts.add(NormPoint(c.position.x / size.width.toFloat(), c.position.y / size.height.toFloat()))
+                            },
+                        )
+                    },
+                ) {
+                    if (pts.size >= 2) {
+                        val path = Path()
+                        path.moveTo(pts[0].x * size.width, pts[0].y * size.height)
+                        for (i in 1 until pts.size) path.lineTo(pts[i].x * size.width, pts[i].y * size.height)
+                        drawPath(path, Color(0xFF15171C), style = Stroke(width = 4f, cap = StrokeCap.Round))
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onSave(pts.toList()) }) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable
@@ -353,8 +416,11 @@ private fun InkToolbar(
     selected: Int,
     highlighter: Boolean,
     noteMode: Boolean,
+    signatureMode: Boolean,
     onTool: (Boolean) -> Unit,
     onNote: () -> Unit,
+    onSignature: () -> Unit,
+    onRedraw: () -> Unit,
     onColor: (Int) -> Unit,
     onClearPage: () -> Unit,
 ) {
@@ -386,6 +452,17 @@ private fun InkToolbar(
                 tint = if (noteMode) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+        IconButton(onClick = onSignature) {
+            Icon(
+                Icons.Filled.Gesture,
+                contentDescription = "Signature",
+                tint = if (signatureMode) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (signatureMode) {
+            TextButton(onClick = onRedraw) { Text("Redraw") }
         }
         InkColors.forEach { argb ->
             val c = Color(argb)
@@ -471,6 +548,8 @@ private fun PageList(
     onStroke: (Int, List<NormPoint>) -> Unit,
     onTapNote: (Int, NormPoint) -> Unit,
     onEditNote: (Annotation) -> Unit,
+    signatureMode: Boolean,
+    onStampSignature: (Int, NormPoint) -> Unit,
     aspectRatioOf: (Int) -> Float,
     renderPage: suspend (Int, Int, Int) -> android.graphics.Bitmap?,
     listState: LazyListState,
@@ -498,6 +577,8 @@ private fun PageList(
                 onStroke = { pts -> onStroke(index, pts) },
                 onTapNote = { pt -> onTapNote(index, pt) },
                 onEditNote = onEditNote,
+                signatureMode = signatureMode,
+                onStampSignature = { pt -> onStampSignature(index, pt) },
                 renderPage = renderPage,
             )
         }
@@ -517,6 +598,8 @@ private fun PdfPageItem(
     onStroke: (List<NormPoint>) -> Unit,
     onTapNote: (NormPoint) -> Unit,
     onEditNote: (Annotation) -> Unit,
+    signatureMode: Boolean,
+    onStampSignature: (NormPoint) -> Unit,
     renderPage: suspend (Int, Int, Int) -> android.graphics.Bitmap?,
 ) {
     val density = LocalDensity.current
@@ -547,14 +630,21 @@ private fun PdfPageItem(
             CircularProgressIndicator()
         }
         Canvas(
-            Modifier.matchParentSize().pointerInput(annotating, noteMode) {
-                if (noteMode) {
+            Modifier.matchParentSize().pointerInput(annotating, noteMode, signatureMode) {
+                if (!annotating) return@pointerInput
+                if (signatureMode) {
+                    detectTapGestures { pos ->
+                        val w = size.width.toFloat().coerceAtLeast(1f)
+                        val h = size.height.toFloat().coerceAtLeast(1f)
+                        onStampSignature(NormPoint(pos.x / w, pos.y / h))
+                    }
+                } else if (noteMode) {
                     detectTapGestures { pos ->
                         val w = size.width.toFloat().coerceAtLeast(1f)
                         val h = size.height.toFloat().coerceAtLeast(1f)
                         onTapNote(NormPoint(pos.x / w, pos.y / h))
                     }
-                } else if (annotating) {
+                } else {
                     detectDragGestures(
                         onDragStart = { o -> live.clear(); live.add(o) },
                         onDrag = { change, _ -> live.add(change.position) },
