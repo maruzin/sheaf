@@ -7,6 +7,7 @@ import com.sheaf.core.domain.model.ReadingPosition
 import com.sheaf.core.domain.repository.DocumentRepository
 import com.sheaf.feature.reader.render.PdfRenderSource
 import com.sheaf.feature.reader.render.PdfRenderSourceFactory
+import com.sheaf.feature.reader.search.PdfTextSearcher
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,6 +20,7 @@ import javax.inject.Inject
 class ReaderViewModel @Inject constructor(
     private val repository: DocumentRepository,
     private val renderFactory: PdfRenderSourceFactory,
+    private val searcher: PdfTextSearcher,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ReaderUiState())
@@ -32,9 +34,16 @@ class ReaderViewModel @Inject constructor(
             is ReaderEvent.PageChanged -> _state.update { it.copy(currentPage = event.page) }
             is ReaderEvent.ZoomChanged -> _state.update { it.copy(zoom = event.zoom) }
             is ReaderEvent.SetTheme -> _state.update { it.copy(theme = event.theme) }
-            ReaderEvent.ToggleOutline -> _state.update { it.copy(outlineVisible = !it.outlineVisible) }
+            ReaderEvent.ToggleSearch -> _state.update {
+                if (it.searchActive) it.copy(searchActive = false, searchResults = emptyList(), searchQuery = "")
+                else it.copy(searchActive = true)
+            }
+            is ReaderEvent.Search -> runSearch(event.query)
+            ReaderEvent.NextResult -> stepResult(+1)
+            ReaderEvent.PrevResult -> stepResult(-1)
+            ReaderEvent.ConsumeScroll -> _state.update { it.copy(pendingScrollPage = null) }
             is ReaderEvent.JumpTo ->
-                _state.update { it.copy(currentPage = event.page, outlineVisible = false) }
+                _state.update { it.copy(currentPage = event.page, pendingScrollPage = event.page) }
         }
     }
 
@@ -63,6 +72,36 @@ class ReaderViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    private fun runSearch(query: String) {
+        val uri = _state.value.uri
+        _state.update { it.copy(searchQuery = query) }
+        if (query.isBlank() || uri.isBlank()) {
+            _state.update { it.copy(searchResults = emptyList(), searching = false) }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(searching = true) }
+            val results = runCatching { searcher.search(uri, query) }.getOrDefault(emptyList())
+            _state.update {
+                it.copy(
+                    searching = false,
+                    searchResults = results,
+                    searchIndex = 0,
+                    pendingScrollPage = results.firstOrNull()?.pageIndex,
+                    currentPage = results.firstOrNull()?.pageIndex ?: it.currentPage,
+                )
+            }
+        }
+    }
+
+    private fun stepResult(delta: Int) {
+        val s = _state.value
+        if (s.searchResults.isEmpty()) return
+        val next = (s.searchIndex + delta + s.searchResults.size) % s.searchResults.size
+        val page = s.searchResults[next].pageIndex
+        _state.update { it.copy(searchIndex = next, pendingScrollPage = page, currentPage = page) }
     }
 
     /** Renders a page bitmap for the UI. Returns null if the source isn't ready or render fails. */

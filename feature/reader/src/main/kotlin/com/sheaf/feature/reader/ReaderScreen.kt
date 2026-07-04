@@ -5,8 +5,10 @@ import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,9 +17,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -26,6 +33,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -46,12 +54,13 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlin.math.roundToInt
 
-/** Reader: vertical scroll of pages, pinch-to-zoom, resume position, reading themes, share. */
+/** Reader: page scroll, pinch-zoom, resume, themes, share, full-text search. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReaderScreen(
@@ -70,6 +79,13 @@ fun ReaderScreen(
         snapshotFlow { listState.firstVisibleItemIndex }
             .collect { viewModel.onEvent(ReaderEvent.PageChanged(it)) }
     }
+    // One-shot scroll to a search result / jump target.
+    LaunchedEffect(state.pendingScrollPage) {
+        state.pendingScrollPage?.let { page ->
+            listState.animateScrollToItem(page.coerceIn(0, (state.pageCount - 1).coerceAtLeast(0)))
+            viewModel.onEvent(ReaderEvent.ConsumeScroll)
+        }
+    }
 
     var zoom by remember { mutableFloatStateOf(1f) }
     var menuOpen by remember { mutableStateOf(false) }
@@ -77,41 +93,55 @@ fun ReaderScreen(
     Scaffold(
         modifier = modifier,
         topBar = {
-            TopAppBar(
-                title = { Text(text = state.displayName.ifBlank { "Reader" }, maxLines = 1) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    IconButton(
-                        onClick = { if (state.uri.isNotBlank()) shareDocument(context, state.uri) },
-                    ) {
-                        Icon(Icons.Filled.Share, contentDescription = "Share")
-                    }
-                    IconButton(onClick = { menuOpen = true }) {
-                        Icon(Icons.Filled.MoreVert, contentDescription = "Reading theme")
-                    }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        ReaderTheme.entries.forEach { theme ->
-                            DropdownMenuItem(
-                                text = { Text(themeLabel(theme) + if (theme == state.theme) "  ✓" else "") },
-                                onClick = {
-                                    viewModel.onEvent(ReaderEvent.SetTheme(theme))
-                                    menuOpen = false
-                                },
-                            )
+            androidx.compose.foundation.layout.Column {
+                TopAppBar(
+                    title = { Text(text = state.displayName.ifBlank { "Reader" }, maxLines = 1) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
-                    }
-                },
-            )
+                    },
+                    actions = {
+                        IconButton(onClick = { viewModel.onEvent(ReaderEvent.ToggleSearch) }) {
+                            Icon(Icons.Filled.Search, contentDescription = "Search")
+                        }
+                        IconButton(
+                            onClick = { if (state.uri.isNotBlank()) shareDocument(context, state.uri) },
+                        ) {
+                            Icon(Icons.Filled.Share, contentDescription = "Share")
+                        }
+                        IconButton(onClick = { menuOpen = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "Reading theme")
+                        }
+                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                            ReaderTheme.entries.forEach { theme ->
+                                DropdownMenuItem(
+                                    text = { Text(themeLabel(theme) + if (theme == state.theme) "  ✓" else "") },
+                                    onClick = {
+                                        viewModel.onEvent(ReaderEvent.SetTheme(theme))
+                                        menuOpen = false
+                                    },
+                                )
+                            }
+                        }
+                    },
+                )
+                if (state.searchActive) {
+                    SearchBar(
+                        query = state.searchQuery,
+                        searching = state.searching,
+                        resultCount = state.searchResults.size,
+                        resultIndex = state.searchIndex,
+                        onSearch = { viewModel.onEvent(ReaderEvent.Search(it)) },
+                        onPrev = { viewModel.onEvent(ReaderEvent.PrevResult) },
+                        onNext = { viewModel.onEvent(ReaderEvent.NextResult) },
+                    )
+                }
+            }
         },
     ) { padding ->
         val bg = readerBackground(state.theme)
-        Box(
-            Modifier.fillMaxSize().padding(padding).background(bg),
-        ) {
+        Box(Modifier.fillMaxSize().padding(padding).background(bg)) {
             when {
                 state.isLoading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                 state.error != null -> Text(
@@ -140,6 +170,48 @@ fun ReaderScreen(
                         .padding(horizontal = 10.dp, vertical = 4.dp),
                 )
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SearchBar(
+    query: String,
+    searching: Boolean,
+    resultCount: Int,
+    resultIndex: Int,
+    onSearch: (String) -> Unit,
+    onPrev: () -> Unit,
+    onNext: () -> Unit,
+) {
+    var text by remember(query) { mutableStateOf(query) }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it },
+            singleLine = true,
+            placeholder = { Text("Search in document") },
+            modifier = Modifier.weight(1f),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { onSearch(text) }),
+        )
+        val label = when {
+            searching -> "…"
+            resultCount == 0 && text.isNotBlank() -> "0"
+            resultCount == 0 -> ""
+            else -> "${resultIndex + 1}/$resultCount"
+        }
+        Text(label)
+        IconButton(onClick = onPrev, enabled = resultCount > 0) {
+            Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Previous result")
+        }
+        IconButton(onClick = onNext, enabled = resultCount > 0) {
+            Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Next result")
         }
     }
 }

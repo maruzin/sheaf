@@ -2,6 +2,8 @@ package com.sheaf.feature.reader.di
 
 import com.sheaf.feature.reader.render.AndroidPdfRenderSource
 import com.sheaf.feature.reader.render.PdfRenderSourceFactory
+import com.sheaf.feature.reader.search.PdfBoxTextSearcher
+import com.sheaf.feature.reader.search.PdfTextSearcher
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -22,4 +24,7 @@ object ReaderDispatcherModule {
 abstract class ReaderBindingModule {
     @Binds
     abstract fun bindRenderFactory(impl: AndroidPdfRenderSource.Factory): PdfRenderSourceFactory
+
+    @Binds
+    abstract fun bindTextSearcher(impl: PdfBoxTextSearcher): PdfTextSearcher
 }

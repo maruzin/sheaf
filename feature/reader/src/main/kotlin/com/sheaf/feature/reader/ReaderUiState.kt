@@ -1,6 +1,7 @@
 package com.sheaf.feature.reader
 
 import com.sheaf.core.domain.model.OutlineEntry
+import com.sheaf.core.domain.model.SearchHit
 
 /** Immutable UI state for the reader screen (unidirectional data flow per Android Stack). */
 data class ReaderUiState(
@@ -15,6 +16,14 @@ data class ReaderUiState(
     val reflow: Boolean = false,
     val outline: List<OutlineEntry> = emptyList(),
     val outlineVisible: Boolean = false,
+    // Search
+    val searchActive: Boolean = false,
+    val searching: Boolean = false,
+    val searchQuery: String = "",
+    val searchResults: List<SearchHit> = emptyList(),
+    val searchIndex: Int = 0,
+    // One-shot page the UI should scroll to (consumed via ConsumeScroll)
+    val pendingScrollPage: Int? = null,
     val error: String? = null,
 )
 
@@ -25,6 +34,10 @@ sealed interface ReaderEvent {
     data class PageChanged(val page: Int) : ReaderEvent
     data class ZoomChanged(val zoom: Float) : ReaderEvent
     data class SetTheme(val theme: ReaderTheme) : ReaderEvent
-    data object ToggleOutline : ReaderEvent
+    data object ToggleSearch : ReaderEvent
+    data class Search(val query: String) : ReaderEvent
+    data object NextResult : ReaderEvent
+    data object PrevResult : ReaderEvent
+    data object ConsumeScroll : ReaderEvent
     data class JumpTo(val page: Int) : ReaderEvent
 }
