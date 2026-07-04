@@ -1,0 +1,11 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Simple "stacked sheets" glyph as a placeholder mark; final icon designed at M2/M8. -->
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M38,32h24l12,12v32h-36z" />
+    <path android:fillColor="#FFFFFF" android:fillAlpha="0.6"
+        android:pathData="M32,38h24l12,12v32h-36z" />
+</vector>

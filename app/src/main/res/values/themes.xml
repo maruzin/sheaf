@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Placeholder app theme; Compose drives real theming via SheafTheme. -->
+    <style name="Theme.Sheaf" parent="android:Theme.Material.NoActionBar" />
+</resources>
