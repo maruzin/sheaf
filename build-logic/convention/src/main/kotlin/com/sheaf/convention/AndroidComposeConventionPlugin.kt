@@ -1,6 +1,8 @@
 package com.sheaf.convention
 
+import com.android.build.api.dsl.ApplicationExtension
 import com.android.build.api.dsl.CommonExtension
+import com.android.build.api.dsl.LibraryExtension
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.artifacts.VersionCatalogsExtension
@@ -12,10 +14,14 @@ class AndroidComposeConventionPlugin : Plugin<Project> {
     override fun apply(target: Project) = with(target) {
         pluginManager.apply("org.jetbrains.kotlin.plugin.compose")
 
-        val extension = extensions.getByType<CommonExtension<*, *, *, *, *, *>>()
-        extension.apply {
-            buildFeatures { compose = true }
-        }
+        // AGP registers the android extension under its concrete type (ApplicationExtension for
+        // app, LibraryExtension for libs), not the generic CommonExtension — so resolve by those.
+        val commonExtension: CommonExtension<*, *, *, *, *, *> =
+            extensions.findByType(ApplicationExtension::class.java)
+                ?: extensions.findByType(LibraryExtension::class.java)
+                ?: error("Apply the android application or library plugin before the compose convention")
+
+        commonExtension.buildFeatures.compose = true
 
         val libs = extensions.getByType<VersionCatalogsExtension>().named("libs")
         dependencies {
