@@ -49,6 +49,7 @@ class ReaderViewModel @Inject constructor(
                 _state.update {
                     it.copy(
                         isLoading = false,
+                        uri = doc.uri,
                         displayName = doc.displayName,
                         pageCount = opened.pageCount,
                         currentPage = restored?.pageIndex ?: 0,

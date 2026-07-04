@@ -1,5 +1,7 @@
 package com.sheaf.feature.reader
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -10,11 +12,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -37,13 +44,14 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlin.math.roundToInt
 
-/** Reader: vertical scroll of pages, pinch-to-zoom, resume position, reading themes. */
+/** Reader: vertical scroll of pages, pinch-to-zoom, resume position, reading themes, share. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReaderScreen(
@@ -53,31 +61,48 @@ fun ReaderScreen(
     viewModel: ReaderViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
 
     LaunchedEffect(documentId) { viewModel.onEvent(ReaderEvent.Open(documentId)) }
 
     val listState = rememberLazyListState()
-    // Report the first visible page back into state so resume + page indicator stay in sync.
     LaunchedEffect(listState) {
         snapshotFlow { listState.firstVisibleItemIndex }
             .collect { viewModel.onEvent(ReaderEvent.PageChanged(it)) }
     }
 
     var zoom by remember { mutableFloatStateOf(1f) }
+    var menuOpen by remember { mutableStateOf(false) }
 
     Scaffold(
         modifier = modifier,
         topBar = {
             TopAppBar(
-                title = {
-                    Text(
-                        text = state.displayName.ifBlank { "Reader" },
-                        maxLines = 1,
-                    )
-                },
+                title = { Text(text = state.displayName.ifBlank { "Reader" }, maxLines = 1) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    IconButton(
+                        onClick = { if (state.uri.isNotBlank()) shareDocument(context, state.uri) },
+                    ) {
+                        Icon(Icons.Filled.Share, contentDescription = "Share")
+                    }
+                    IconButton(onClick = { menuOpen = true }) {
+                        Icon(Icons.Filled.MoreVert, contentDescription = "Reading theme")
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        ReaderTheme.entries.forEach { theme ->
+                            DropdownMenuItem(
+                                text = { Text(themeLabel(theme) + if (theme == state.theme) "  ✓" else "") },
+                                onClick = {
+                                    viewModel.onEvent(ReaderEvent.SetTheme(theme))
+                                    menuOpen = false
+                                },
+                            )
+                        }
                     }
                 },
             )
@@ -85,10 +110,7 @@ fun ReaderScreen(
     ) { padding ->
         val bg = readerBackground(state.theme)
         Box(
-            Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .background(bg),
+            Modifier.fillMaxSize().padding(padding).background(bg),
         ) {
             when {
                 state.isLoading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
@@ -122,6 +144,15 @@ fun ReaderScreen(
     }
 }
 
+private fun shareDocument(context: android.content.Context, uri: String) {
+    val send = Intent(Intent.ACTION_SEND).apply {
+        type = "application/pdf"
+        putExtra(Intent.EXTRA_STREAM, Uri.parse(uri))
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    runCatching { context.startActivity(Intent.createChooser(send, "Share PDF")) }
+}
+
 @Composable
 private fun PageList(
     pageCount: Int,
@@ -129,7 +160,7 @@ private fun PageList(
     onZoom: (Float) -> Unit,
     aspectRatioOf: (Int) -> Float,
     renderPage: suspend (Int, Int, Int) -> android.graphics.Bitmap?,
-    listState: androidx.compose.foundation.lazy.LazyListState,
+    listState: LazyListState,
     contentPadding: PaddingValues,
 ) {
     val pages = remember(pageCount) { (0 until pageCount).toList() }
@@ -162,7 +193,6 @@ private fun PdfPageItem(
 ) {
     val density = LocalDensity.current
     val screenWidthPx = with(density) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
-    // Cap render resolution to avoid oversized bitmaps at high zoom (memory-safe windowing).
     val targetWidthPx = (screenWidthPx * zoom).roundToInt().coerceIn(1, 3000)
     val targetHeightPx = (targetWidthPx * aspectRatio).roundToInt().coerceIn(1, 6000)
 
@@ -172,10 +202,7 @@ private fun PdfPageItem(
     }
 
     Box(
-        Modifier
-            .fillMaxWidth()
-            .aspectRatio(1f / aspectRatio)
-            .padding(vertical = 6.dp),
+        Modifier.fillMaxWidth().aspectRatio(1f / aspectRatio).padding(vertical = 6.dp),
         contentAlignment = Alignment.Center,
     ) {
         val bmp = bitmap
@@ -190,6 +217,13 @@ private fun PdfPageItem(
             CircularProgressIndicator()
         }
     }
+}
+
+private fun themeLabel(theme: ReaderTheme): String = when (theme) {
+    ReaderTheme.System -> "System"
+    ReaderTheme.Light -> "Light"
+    ReaderTheme.Dark -> "Dark"
+    ReaderTheme.Sepia -> "Sepia"
 }
 
 private fun readerBackground(theme: ReaderTheme): Color = when (theme) {

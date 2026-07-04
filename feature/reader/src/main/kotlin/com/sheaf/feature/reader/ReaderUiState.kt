@@ -6,6 +6,7 @@ import com.sheaf.core.domain.model.OutlineEntry
 data class ReaderUiState(
     val isLoading: Boolean = true,
     val documentId: Long? = null,
+    val uri: String = "",
     val displayName: String = "",
     val pageCount: Int = 0,
     val currentPage: Int = 0,
