@@ -1,5 +1,6 @@
 package com.sheaf.feature.reader
 
+import com.sheaf.core.domain.model.Annotation
 import com.sheaf.core.domain.model.OutlineEntry
 import com.sheaf.core.domain.model.SearchHit
 
@@ -22,6 +23,10 @@ data class ReaderUiState(
     val searchQuery: String = "",
     val searchResults: List<SearchHit> = emptyList(),
     val searchIndex: Int = 0,
+    // Annotations
+    val annotating: Boolean = false,
+    val inkColorArgb: Int = 0xFFE4713B.toInt(),
+    val annotationsByPage: Map<Int, List<Annotation>> = emptyMap(),
     // One-shot page the UI should scroll to (consumed via ConsumeScroll)
     val pendingScrollPage: Int? = null,
     val error: String? = null,
@@ -39,6 +44,8 @@ sealed interface ReaderEvent {
     data class Search(val query: String) : ReaderEvent
     data object NextResult : ReaderEvent
     data object PrevResult : ReaderEvent
+    data object ToggleAnnotate : ReaderEvent
+    data class SetInkColor(val argb: Int) : ReaderEvent
     data object ConsumeScroll : ReaderEvent
     data class JumpTo(val page: Int) : ReaderEvent
 }

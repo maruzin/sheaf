@@ -3,7 +3,11 @@ package com.sheaf.feature.reader
 import android.graphics.Bitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.sheaf.core.domain.model.Annotation
+import com.sheaf.core.domain.model.AnnotationType
+import com.sheaf.core.domain.model.NormPoint
 import com.sheaf.core.domain.model.ReadingPosition
+import com.sheaf.core.domain.repository.AnnotationRepository
 import com.sheaf.core.domain.repository.DocumentRepository
 import com.sheaf.feature.reader.render.PdfRenderSource
 import com.sheaf.feature.reader.render.PdfRenderSourceFactory
@@ -23,6 +27,7 @@ class ReaderViewModel @Inject constructor(
     private val renderFactory: PdfRenderSourceFactory,
     private val searcher: PdfTextSearcher,
     private val outlineExtractor: PdfOutlineExtractor,
+    private val annotationRepo: AnnotationRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ReaderUiState())
@@ -36,6 +41,8 @@ class ReaderViewModel @Inject constructor(
             is ReaderEvent.PageChanged -> _state.update { it.copy(currentPage = event.page) }
             is ReaderEvent.ZoomChanged -> _state.update { it.copy(zoom = event.zoom) }
             is ReaderEvent.SetTheme -> _state.update { it.copy(theme = event.theme) }
+            ReaderEvent.ToggleAnnotate -> _state.update { it.copy(annotating = !it.annotating) }
+            is ReaderEvent.SetInkColor -> _state.update { it.copy(inkColorArgb = event.argb) }
             ReaderEvent.ToggleOutline -> _state.update { it.copy(outlineVisible = !it.outlineVisible) }
             ReaderEvent.ToggleSearch -> _state.update {
                 if (it.searchActive) it.copy(searchActive = false, searchResults = emptyList(), searchQuery = "")
@@ -70,6 +77,7 @@ class ReaderViewModel @Inject constructor(
                     )
                 }
                 loadOutline(doc.uri)
+                observeAnnotations(documentId)
             }.onFailure { t ->
                 _state.update {
                     it.copy(isLoading = false, error = t.message ?: "Failed to open document")
@@ -113,6 +121,40 @@ class ReaderViewModel @Inject constructor(
             val toc = runCatching { outlineExtractor.outline(uri) }.getOrDefault(emptyList())
             if (toc.isNotEmpty()) _state.update { it.copy(outline = toc) }
         }
+    }
+
+    private var annotationsStarted = false
+    private fun observeAnnotations(documentId: Long) {
+        if (annotationsStarted) return
+        annotationsStarted = true
+        viewModelScope.launch {
+            annotationRepo.observeForDocument(documentId).collect { list ->
+                _state.update { it.copy(annotationsByPage = list.groupBy { a -> a.pageIndex }) }
+            }
+        }
+    }
+
+    /** Persist a finished ink stroke (points are page-normalized 0..1). */
+    fun saveStroke(pageIndex: Int, points: List<NormPoint>) {
+        val id = _state.value.documentId ?: return
+        if (points.size < 2) return
+        viewModelScope.launch {
+            annotationRepo.upsert(
+                Annotation(
+                    documentId = id,
+                    pageIndex = pageIndex,
+                    type = AnnotationType.Ink,
+                    colorArgb = _state.value.inkColorArgb,
+                    strokeWidth = 0.004f,
+                    points = points,
+                ),
+            )
+        }
+    }
+
+    fun clearPageAnnotations(pageIndex: Int) {
+        val id = _state.value.documentId ?: return
+        viewModelScope.launch { annotationRepo.clearPage(id, pageIndex) }
     }
 
     /** Renders a page bitmap for the UI. Returns null if the source isn't ready or render fails. */
