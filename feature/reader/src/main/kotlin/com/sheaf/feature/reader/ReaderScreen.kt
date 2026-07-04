@@ -33,6 +33,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Draw
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
@@ -136,6 +138,11 @@ fun ReaderScreen(
                         }
                     },
                     actions = {
+                        if (state.annotationsByPage.isNotEmpty()) {
+                            IconButton(onClick = { viewModel.onEvent(ReaderEvent.ToggleAnnotationsList) }) {
+                                Icon(Icons.Filled.EditNote, contentDescription = "Annotations")
+                            }
+                        }
                         IconButton(onClick = { viewModel.onEvent(ReaderEvent.ToggleAnnotate) }) {
                             Icon(
                                 Icons.Filled.Draw,
@@ -260,6 +267,45 @@ fun ReaderScreen(
                             }
                             .padding(start = (12 + entry.depth * 16).dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
                     )
+                }
+            }
+        }
+    }
+
+    if (state.annotationsListVisible) {
+        val all = remember(state.annotationsByPage) {
+            state.annotationsByPage.values.flatten().sortedWith(compareBy({ it.pageIndex }, { it.createdAt }))
+        }
+        ModalBottomSheet(onDismissRequest = { viewModel.onEvent(ReaderEvent.ToggleAnnotationsList) }) {
+            LazyColumn(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+                items(all, key = { it.id }) { ann ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                viewModel.onEvent(ReaderEvent.JumpTo(ann.pageIndex))
+                                viewModel.onEvent(ReaderEvent.ToggleAnnotationsList)
+                            }
+                            .padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            Modifier.size(12.dp).background(Color(ann.colorArgb), CircleShape),
+                        )
+                        Text(
+                            text = annotationLabel(ann),
+                            maxLines = 2,
+                            modifier = Modifier.weight(1f).padding(start = 12.dp),
+                        )
+                        Text(
+                            "p.${ann.pageIndex + 1}",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 8.dp),
+                        )
+                        IconButton(onClick = { viewModel.deleteAnnotation(ann.id) }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "Delete")
+                        }
+                    }
                 }
             }
         }
@@ -576,6 +622,14 @@ private fun DrawScope.drawInk(points: List<NormPoint>, color: Color, widthFrac: 
         color = color,
         style = Stroke(width = (widthFrac * size.width).coerceAtLeast(2f), cap = StrokeCap.Round),
     )
+}
+
+private fun annotationLabel(ann: Annotation): String = when (ann.type) {
+    AnnotationType.Note -> ann.note?.takeIf { it.isNotBlank() } ?: "Note"
+    AnnotationType.Highlight -> "Highlight"
+    AnnotationType.Underline -> "Underline"
+    AnnotationType.Strikethrough -> "Strikethrough"
+    AnnotationType.Ink -> "Ink"
 }
 
 private fun themeLabel(theme: ReaderTheme): String = when (theme) {

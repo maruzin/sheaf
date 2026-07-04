@@ -28,6 +28,7 @@ data class ReaderUiState(
     val inkColorArgb: Int = 0xFFE4713B.toInt(),
     val highlighter: Boolean = false,
     val noteMode: Boolean = false,
+    val annotationsListVisible: Boolean = false,
     val annotationsByPage: Map<Int, List<Annotation>> = emptyMap(),
     // One-shot page the UI should scroll to (consumed via ConsumeScroll)
     val pendingScrollPage: Int? = null,
@@ -42,6 +43,7 @@ sealed interface ReaderEvent {
     data class ZoomChanged(val zoom: Float) : ReaderEvent
     data class SetTheme(val theme: ReaderTheme) : ReaderEvent
     data object ToggleOutline : ReaderEvent
+    data object ToggleAnnotationsList : ReaderEvent
     data object ToggleSearch : ReaderEvent
     data class Search(val query: String) : ReaderEvent
     data object NextResult : ReaderEvent

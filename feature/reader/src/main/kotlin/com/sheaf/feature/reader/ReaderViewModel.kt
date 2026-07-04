@@ -46,6 +46,7 @@ class ReaderViewModel @Inject constructor(
             is ReaderEvent.SetHighlighter -> _state.update { it.copy(highlighter = event.on, noteMode = false) }
             is ReaderEvent.SetNoteMode -> _state.update { it.copy(noteMode = event.on) }
             ReaderEvent.ToggleOutline -> _state.update { it.copy(outlineVisible = !it.outlineVisible) }
+            ReaderEvent.ToggleAnnotationsList -> _state.update { it.copy(annotationsListVisible = !it.annotationsListVisible) }
             ReaderEvent.ToggleSearch -> _state.update {
                 if (it.searchActive) it.copy(searchActive = false, searchResults = emptyList(), searchQuery = "")
                 else it.copy(searchActive = true)
