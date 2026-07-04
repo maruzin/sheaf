@@ -4,6 +4,23 @@ Running engineering log. Newest first. Every non-obvious decision gets one line 
 
 ---
 
+## M2 — Design system + app shell (2026-07-04)
+
+### Visual direction chosen: **Ember** (of 4 proposed to Dean)
+- Neutral slate surfaces + one warm ember accent; document stays the hero. Rejected: Blueprint
+  (cyan/technical), Midnight (OLED black/ink-blue), Vellum (warm serif). Followed the Opus 4.8
+  "propose 4 directions, implement one" rule; avoided the cream/serif house style and AI-slop defaults.
+- **Palette:** dark bg `#15171C`, light bg `#F5F6F8`, accent `#E4713B` (dark) / `#C85A28` (light),
+  onPrimary `#3A1608`. Full Material3 light + dark ColorSchemes in `core:ui/theme/Theme.kt`.
+- **Type:** Hanken Grotesk (bundled variable TTF from google/fonts, 3 weights) applied across the
+  Material3 type scale in `core:ui/theme/Type.kt` — no Inter/Roboto default.
+- Material You dynamic color kept as an opt-in (`dynamicColor` flag), Ember is the default identity.
+- Launcher background aligned to slate `#15171C`; reader "System" page tint aligned to brand slate.
+- Propagates app-wide via `SheafTheme` (colorScheme + typography); no per-screen changes needed.
+
+### Still to do in M2 (next)
+- App shell polish: onboarding, settings screen, foldable/tablet two-pane for library+reader, TalkBack pass.
+
 ## M1 — Reader core (in progress, 2026-07-04)
 
 ### Engine decision for the M1 baseline

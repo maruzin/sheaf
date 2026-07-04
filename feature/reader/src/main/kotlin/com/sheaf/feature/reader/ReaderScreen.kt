@@ -345,5 +345,5 @@ private fun readerBackground(theme: ReaderTheme): Color = when (theme) {
     ReaderTheme.Sepia -> Color(0xFFF4ECD8)
     ReaderTheme.Light -> Color(0xFFFFFFFF)
     ReaderTheme.Dark -> Color(0xFF121212)
-    ReaderTheme.System -> Color(0xFF2A2A2A)
+    ReaderTheme.System -> Color(0xFF15171C)
 }
