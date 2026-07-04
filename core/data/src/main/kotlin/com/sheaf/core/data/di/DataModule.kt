@@ -2,9 +2,12 @@ package com.sheaf.core.data.di
 
 import android.content.Context
 import androidx.room.Room
+import com.sheaf.core.data.db.AnnotationDao
 import com.sheaf.core.data.db.DocumentDao
 import com.sheaf.core.data.db.SheafDatabase
+import com.sheaf.core.data.repository.DefaultAnnotationRepository
 import com.sheaf.core.data.repository.DefaultDocumentRepository
+import com.sheaf.core.domain.repository.AnnotationRepository
 import com.sheaf.core.domain.repository.DocumentRepository
 import dagger.Binds
 import dagger.Module
@@ -20,10 +23,15 @@ object DatabaseModule {
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): SheafDatabase =
-        Room.databaseBuilder(context, SheafDatabase::class.java, "sheaf.db").build()
+        Room.databaseBuilder(context, SheafDatabase::class.java, "sheaf.db")
+            .fallbackToDestructiveMigration()
+            .build()
 
     @Provides
     fun provideDocumentDao(db: SheafDatabase): DocumentDao = db.documentDao()
+
+    @Provides
+    fun provideAnnotationDao(db: SheafDatabase): AnnotationDao = db.annotationDao()
 }
 
 @Module
@@ -31,4 +39,7 @@ object DatabaseModule {
 abstract class RepositoryModule {
     @Binds
     abstract fun bindDocumentRepository(impl: DefaultDocumentRepository): DocumentRepository
+
+    @Binds
+    abstract fun bindAnnotationRepository(impl: DefaultAnnotationRepository): AnnotationRepository
 }
