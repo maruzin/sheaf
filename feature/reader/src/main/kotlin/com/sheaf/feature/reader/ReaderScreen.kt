@@ -8,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -37,6 +38,8 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.StickyNote2
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -61,6 +64,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -117,6 +121,8 @@ fun ReaderScreen(
 
     var zoom by remember { mutableFloatStateOf(1f) }
     var menuOpen by remember { mutableStateOf(false) }
+    var pendingNote by remember { mutableStateOf<Pair<Int, NormPoint>?>(null) }
+    var editingNote by remember { mutableStateOf<Annotation?>(null) }
 
     Scaffold(
         modifier = modifier,
@@ -188,7 +194,9 @@ fun ReaderScreen(
                     InkToolbar(
                         selected = state.inkColorArgb,
                         highlighter = state.highlighter,
+                        noteMode = state.noteMode,
                         onTool = { viewModel.onEvent(ReaderEvent.SetHighlighter(it)) },
+                        onNote = { viewModel.onEvent(ReaderEvent.SetNoteMode(true)) },
                         onColor = { viewModel.onEvent(ReaderEvent.SetInkColor(it)) },
                         onClearPage = { viewModel.clearPageAnnotations(state.currentPage) },
                     )
@@ -210,10 +218,13 @@ fun ReaderScreen(
                     zoom = zoom,
                     annotating = state.annotating,
                     highlighter = state.highlighter,
+                    noteMode = state.noteMode,
                     inkColor = Color(state.inkColorArgb),
                     annotationsByPage = state.annotationsByPage,
                     onZoom = { factor -> zoom = (zoom * factor).coerceIn(1f, 5f) },
                     onStroke = { page, pts -> viewModel.saveStroke(page, pts) },
+                    onTapNote = { page, pt -> pendingNote = page to pt },
+                    onEditNote = { ann -> editingNote = ann },
                     aspectRatioOf = viewModel::aspectRatio,
                     renderPage = { i, w, h -> viewModel.renderPage(i, w, h) },
                     listState = listState,
@@ -253,13 +264,51 @@ fun ReaderScreen(
             }
         }
     }
+
+    pendingNote?.let { (page, pt) ->
+        NoteDialog("",  { pendingNote = null }, { t -> viewModel.saveNote(page, pt, t); pendingNote = null }, null)
+    }
+    editingNote?.let { ann ->
+        NoteDialog(ann.note.orEmpty(), { editingNote = null }, { t -> viewModel.updateNote(ann, t); editingNote = null }, { viewModel.deleteAnnotation(ann.id); editingNote = null })
+    }
+}
+
+@Composable
+private fun NoteDialog(
+    initial: String,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+    onDelete: (() -> Unit)?,
+) {
+    var text by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Note") },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                placeholder = { Text("Type a note") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = { TextButton(onClick = { onSave(text) }) { Text("Save") } },
+        dismissButton = {
+            Row {
+                if (onDelete != null) TextButton(onClick = onDelete) { Text("Delete") }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        },
+    )
 }
 
 @Composable
 private fun InkToolbar(
     selected: Int,
     highlighter: Boolean,
+    noteMode: Boolean,
     onTool: (Boolean) -> Unit,
+    onNote: () -> Unit,
     onColor: (Int) -> Unit,
     onClearPage: () -> Unit,
 ) {
@@ -272,7 +321,7 @@ private fun InkToolbar(
             Icon(
                 Icons.Filled.Draw,
                 contentDescription = "Pen",
-                tint = if (!highlighter) MaterialTheme.colorScheme.primary
+                tint = if (!highlighter && !noteMode) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -280,7 +329,15 @@ private fun InkToolbar(
             Icon(
                 Icons.Filled.Brush,
                 contentDescription = "Highlighter",
-                tint = if (highlighter) MaterialTheme.colorScheme.primary
+                tint = if (highlighter && !noteMode) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        IconButton(onClick = onNote) {
+            Icon(
+                Icons.Filled.StickyNote2,
+                contentDescription = "Note",
+                tint = if (noteMode) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -361,10 +418,13 @@ private fun PageList(
     zoom: Float,
     annotating: Boolean,
     highlighter: Boolean,
+    noteMode: Boolean,
     inkColor: Color,
     annotationsByPage: Map<Int, List<Annotation>>,
     onZoom: (Float) -> Unit,
     onStroke: (Int, List<NormPoint>) -> Unit,
+    onTapNote: (Int, NormPoint) -> Unit,
+    onEditNote: (Annotation) -> Unit,
     aspectRatioOf: (Int) -> Float,
     renderPage: suspend (Int, Int, Int) -> android.graphics.Bitmap?,
     listState: LazyListState,
@@ -386,9 +446,12 @@ private fun PageList(
                 aspectRatio = aspectRatioOf(index),
                 annotating = annotating,
                 highlighter = highlighter,
+                noteMode = noteMode,
                 inkColor = inkColor,
                 savedStrokes = annotationsByPage[index].orEmpty(),
                 onStroke = { pts -> onStroke(index, pts) },
+                onTapNote = { pt -> onTapNote(index, pt) },
+                onEditNote = onEditNote,
                 renderPage = renderPage,
             )
         }
@@ -402,9 +465,12 @@ private fun PdfPageItem(
     aspectRatio: Float,
     annotating: Boolean,
     highlighter: Boolean,
+    noteMode: Boolean,
     inkColor: Color,
     savedStrokes: List<Annotation>,
     onStroke: (List<NormPoint>) -> Unit,
+    onTapNote: (NormPoint) -> Unit,
+    onEditNote: (Annotation) -> Unit,
     renderPage: suspend (Int, Int, Int) -> android.graphics.Bitmap?,
 ) {
     val density = LocalDensity.current
@@ -435,8 +501,14 @@ private fun PdfPageItem(
             CircularProgressIndicator()
         }
         Canvas(
-            Modifier.matchParentSize().pointerInput(annotating) {
-                if (annotating) {
+            Modifier.matchParentSize().pointerInput(annotating, noteMode) {
+                if (noteMode) {
+                    detectTapGestures { pos ->
+                        val w = size.width.toFloat().coerceAtLeast(1f)
+                        val h = size.height.toFloat().coerceAtLeast(1f)
+                        onTapNote(NormPoint(pos.x / w, pos.y / h))
+                    }
+                } else if (annotating) {
                     detectDragGestures(
                         onDragStart = { o -> live.clear(); live.add(o) },
                         onDrag = { change, _ -> live.add(change.position) },
@@ -473,6 +545,22 @@ private fun PdfPageItem(
                         cap = if (highlighter) StrokeCap.Square else StrokeCap.Round,
                     ),
                 )
+            }
+        }
+        savedStrokes.forEach { ann ->
+            if (ann.type == AnnotationType.Note) {
+                val pt = ann.points.firstOrNull()
+                if (pt != null) {
+                    Icon(
+                        imageVector = Icons.Filled.StickyNote2,
+                        contentDescription = "Note",
+                        tint = Color(ann.colorArgb),
+                        modifier = Modifier
+                            .align(BiasAlignment(2f * pt.x - 1f, 2f * pt.y - 1f))
+                            .size(28.dp)
+                            .clickable { onEditNote(ann) },
+                    )
+                }
             }
         }
     }

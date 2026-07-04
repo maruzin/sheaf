@@ -43,7 +43,8 @@ class ReaderViewModel @Inject constructor(
             is ReaderEvent.SetTheme -> _state.update { it.copy(theme = event.theme) }
             ReaderEvent.ToggleAnnotate -> _state.update { it.copy(annotating = !it.annotating) }
             is ReaderEvent.SetInkColor -> _state.update { it.copy(inkColorArgb = event.argb) }
-            is ReaderEvent.SetHighlighter -> _state.update { it.copy(highlighter = event.on) }
+            is ReaderEvent.SetHighlighter -> _state.update { it.copy(highlighter = event.on, noteMode = false) }
+            is ReaderEvent.SetNoteMode -> _state.update { it.copy(noteMode = event.on) }
             ReaderEvent.ToggleOutline -> _state.update { it.copy(outlineVisible = !it.outlineVisible) }
             ReaderEvent.ToggleSearch -> _state.update {
                 if (it.searchActive) it.copy(searchActive = false, searchResults = emptyList(), searchQuery = "")
@@ -157,6 +158,35 @@ class ReaderViewModel @Inject constructor(
     fun clearPageAnnotations(pageIndex: Int) {
         val id = _state.value.documentId ?: return
         viewModelScope.launch { annotationRepo.clearPage(id, pageIndex) }
+    }
+
+    fun saveNote(pageIndex: Int, point: NormPoint, text: String) {
+        val id = _state.value.documentId ?: return
+        if (text.isBlank()) return
+        viewModelScope.launch {
+            annotationRepo.upsert(
+                Annotation(
+                    documentId = id,
+                    pageIndex = pageIndex,
+                    type = AnnotationType.Note,
+                    colorArgb = _state.value.inkColorArgb,
+                    strokeWidth = 0f,
+                    points = listOf(point),
+                    note = text.trim(),
+                ),
+            )
+        }
+    }
+
+    fun updateNote(annotation: Annotation, text: String) {
+        viewModelScope.launch {
+            if (text.isBlank()) annotationRepo.delete(annotation.id)
+            else annotationRepo.upsert(annotation.copy(note = text.trim()))
+        }
+    }
+
+    fun deleteAnnotation(id: Long) {
+        viewModelScope.launch { annotationRepo.delete(id) }
     }
 
     /** Renders a page bitmap for the UI. Returns null if the source isn't ready or render fails. */
