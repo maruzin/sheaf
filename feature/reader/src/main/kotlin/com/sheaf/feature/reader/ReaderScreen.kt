@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,6 +22,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
@@ -33,6 +35,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -102,6 +105,11 @@ fun ReaderScreen(
                         }
                     },
                     actions = {
+                        if (state.outline.isNotEmpty()) {
+                            IconButton(onClick = { viewModel.onEvent(ReaderEvent.ToggleOutline) }) {
+                                Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Contents")
+                            }
+                        }
                         IconButton(onClick = { viewModel.onEvent(ReaderEvent.ToggleSearch) }) {
                             Icon(Icons.Filled.Search, contentDescription = "Search")
                         }
@@ -169,6 +177,31 @@ fun ReaderScreen(
                         .background(Color(0x99000000))
                         .padding(horizontal = 10.dp, vertical = 4.dp),
                 )
+            }
+        }
+    }
+
+    if (state.outlineVisible) {
+        ModalBottomSheet(onDismissRequest = { viewModel.onEvent(ReaderEvent.ToggleOutline) }) {
+            LazyColumn(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+                items(state.outline, key = { it.title + it.pageIndex + it.depth }) { entry ->
+                    Text(
+                        text = entry.title.ifBlank { "(untitled)" },
+                        maxLines = 2,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                viewModel.onEvent(ReaderEvent.JumpTo(entry.pageIndex))
+                                viewModel.onEvent(ReaderEvent.ToggleOutline)
+                            }
+                            .padding(
+                                start = (12 + entry.depth * 16).dp,
+                                end = 16.dp,
+                                top = 10.dp,
+                                bottom = 10.dp,
+                            ),
+                    )
+                }
             }
         }
     }

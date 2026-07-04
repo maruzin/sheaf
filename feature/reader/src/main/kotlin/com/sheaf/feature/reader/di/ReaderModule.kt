@@ -2,7 +2,9 @@ package com.sheaf.feature.reader.di
 
 import com.sheaf.feature.reader.render.AndroidPdfRenderSource
 import com.sheaf.feature.reader.render.PdfRenderSourceFactory
+import com.sheaf.feature.reader.search.PdfBoxOutlineExtractor
 import com.sheaf.feature.reader.search.PdfBoxTextSearcher
+import com.sheaf.feature.reader.search.PdfOutlineExtractor
 import com.sheaf.feature.reader.search.PdfTextSearcher
 import dagger.Binds
 import dagger.Module
@@ -27,4 +29,7 @@ abstract class ReaderBindingModule {
 
     @Binds
     abstract fun bindTextSearcher(impl: PdfBoxTextSearcher): PdfTextSearcher
+
+    @Binds
+    abstract fun bindOutlineExtractor(impl: PdfBoxOutlineExtractor): PdfOutlineExtractor
 }

@@ -7,6 +7,7 @@ import com.sheaf.core.domain.model.ReadingPosition
 import com.sheaf.core.domain.repository.DocumentRepository
 import com.sheaf.feature.reader.render.PdfRenderSource
 import com.sheaf.feature.reader.render.PdfRenderSourceFactory
+import com.sheaf.feature.reader.search.PdfOutlineExtractor
 import com.sheaf.feature.reader.search.PdfTextSearcher
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,6 +22,7 @@ class ReaderViewModel @Inject constructor(
     private val repository: DocumentRepository,
     private val renderFactory: PdfRenderSourceFactory,
     private val searcher: PdfTextSearcher,
+    private val outlineExtractor: PdfOutlineExtractor,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ReaderUiState())
@@ -34,6 +36,7 @@ class ReaderViewModel @Inject constructor(
             is ReaderEvent.PageChanged -> _state.update { it.copy(currentPage = event.page) }
             is ReaderEvent.ZoomChanged -> _state.update { it.copy(zoom = event.zoom) }
             is ReaderEvent.SetTheme -> _state.update { it.copy(theme = event.theme) }
+            ReaderEvent.ToggleOutline -> _state.update { it.copy(outlineVisible = !it.outlineVisible) }
             ReaderEvent.ToggleSearch -> _state.update {
                 if (it.searchActive) it.copy(searchActive = false, searchResults = emptyList(), searchQuery = "")
                 else it.copy(searchActive = true)
@@ -66,6 +69,7 @@ class ReaderViewModel @Inject constructor(
                         outline = opened.outline(),
                     )
                 }
+                loadOutline(doc.uri)
             }.onFailure { t ->
                 _state.update {
                     it.copy(isLoading = false, error = t.message ?: "Failed to open document")
@@ -102,6 +106,13 @@ class ReaderViewModel @Inject constructor(
         val next = (s.searchIndex + delta + s.searchResults.size) % s.searchResults.size
         val page = s.searchResults[next].pageIndex
         _state.update { it.copy(searchIndex = next, pendingScrollPage = page, currentPage = page) }
+    }
+
+    private fun loadOutline(uri: String) {
+        viewModelScope.launch {
+            val toc = runCatching { outlineExtractor.outline(uri) }.getOrDefault(emptyList())
+            if (toc.isNotEmpty()) _state.update { it.copy(outline = toc) }
+        }
     }
 
     /** Renders a page bitmap for the UI. Returns null if the source isn't ready or render fails. */

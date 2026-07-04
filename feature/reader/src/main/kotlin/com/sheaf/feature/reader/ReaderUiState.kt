@@ -34,6 +34,7 @@ sealed interface ReaderEvent {
     data class PageChanged(val page: Int) : ReaderEvent
     data class ZoomChanged(val zoom: Float) : ReaderEvent
     data class SetTheme(val theme: ReaderTheme) : ReaderEvent
+    data object ToggleOutline : ReaderEvent
     data object ToggleSearch : ReaderEvent
     data class Search(val query: String) : ReaderEvent
     data object NextResult : ReaderEvent
