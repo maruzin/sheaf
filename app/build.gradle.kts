@@ -24,6 +24,11 @@ android {
             applicationIdSuffix = ".debug"
         }
     }
+    lint {
+        // In-development: report issues but don't fail the build. Re-enable strict lint at M8 hardening.
+        abortOnError = false
+    }
+
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }

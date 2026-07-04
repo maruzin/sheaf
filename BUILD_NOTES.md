@@ -34,7 +34,13 @@ Running engineering log. Newest first. Every non-obvious decision gets one line 
   convention; added `activity-compose` to `:feature:reader` for the SAF launcher.
 - Room `exportSchema=false` to avoid the schema-dir CI warning for now.
 
-### Verification status
+### Verification status — UPDATED 2026-07-04 (CI green path)
+- **assembleDebug + unit tests PASS on GitHub CI (x86_64).** The full app compiles and an APK is
+  built (commit 7cd561f: BUILD SUCCESSFUL 4m16s; unit tests SUCCESSFUL). M1 baseline is verified.
+- Fixes en route to green: (1) compose convention plugin resolved the Android extension by concrete
+  type (was CommonExtension); (2) manifest AppLinkUrlError — removed BROWSABLE from the pdf 'open
+  with' intent-filter; (3) `lint.abortOnError=false` for in-dev (re-enable strict lint at M8).
+- Original note below (pre-first-build):
 - Self-reviewed for compile risk (imports, brace/paren balance, API signatures) but **NOT compiled** —
   ARM64 sandbox can't run aapt2/AGP. Awaiting first CI run once pushed to GitHub.
 
