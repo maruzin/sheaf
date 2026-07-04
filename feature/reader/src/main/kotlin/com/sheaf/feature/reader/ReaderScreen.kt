@@ -102,7 +102,7 @@ fun ReaderScreen(
                     zoom = zoom,
                     onZoom = { factor -> zoom = (zoom * factor).coerceIn(1f, 5f) },
                     aspectRatioOf = viewModel::aspectRatio,
-                    renderPage = viewModel::renderPage,
+                    renderPage = { i, w, h -> viewModel.renderPage(i, w, h) },
                     listState = listState,
                     contentPadding = PaddingValues(vertical = 8.dp),
                 )
