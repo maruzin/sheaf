@@ -6,9 +6,10 @@ android {
 }
 dependencies {
     implementation(project(":core:data"))
-    // Rendering engine: provisional PDFium fork. FINAL decision recorded in BUILD_NOTES at M1 start
-    // after benchmarking vs androidx.pdf against the 100MB / 1000-page budgets.
-    implementation(libs.pdfium.android)
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material.icons.extended)
+    // M1 baseline renders via the platform android.graphics.pdf.PdfRenderer — no external engine dep.
+    // PDFium / androidx.pdf are the production-engine candidates (benchmark), swappable behind
+    // PdfRenderSource. See BUILD_NOTES.md.
 }

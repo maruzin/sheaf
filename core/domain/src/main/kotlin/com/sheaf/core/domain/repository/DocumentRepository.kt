@@ -8,6 +8,8 @@ import kotlinx.coroutines.flow.Flow
 interface DocumentRepository {
     fun observeRecents(limit: Int = 50): Flow<List<Document>>
     fun observeBookmarked(): Flow<List<Document>>
+    suspend fun document(id: Long): Document?
+    suspend fun findByUri(uri: String): Document?
     suspend fun upsert(document: Document): Long
     suspend fun setBookmarked(documentId: Long, bookmarked: Boolean)
     suspend fun saveReadingPosition(position: ReadingPosition)

@@ -19,13 +19,11 @@ data class ReaderUiState(
 
 enum class ReaderTheme { System, Light, Dark, Sepia }
 
-/** One-shot user intents the ViewModel reduces into state. */
 sealed interface ReaderEvent {
-    data class Open(val documentId: Long, val uri: String) : ReaderEvent
+    data class Open(val documentId: Long) : ReaderEvent
     data class PageChanged(val page: Int) : ReaderEvent
     data class ZoomChanged(val zoom: Float) : ReaderEvent
     data class SetTheme(val theme: ReaderTheme) : ReaderEvent
-    data object ToggleReflow : ReaderEvent
     data object ToggleOutline : ReaderEvent
     data class JumpTo(val page: Int) : ReaderEvent
 }

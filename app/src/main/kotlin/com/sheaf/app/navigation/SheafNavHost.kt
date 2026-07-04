@@ -1,19 +1,19 @@
 package com.sheaf.app.navigation
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.navArgument
+import com.sheaf.feature.reader.ReaderScreen
+import com.sheaf.feature.reader.library.LibraryScreen
 
-/** Top-level navigation graph. Destinations are filled in as features land per milestone. */
 object Routes {
     const val LIBRARY = "library"
     const val READER = "reader/{documentId}"
+    fun reader(documentId: Long) = "reader/$documentId"
 }
 
 @Composable
@@ -27,10 +27,19 @@ fun SheafNavHost(
         modifier = modifier,
     ) {
         composable(Routes.LIBRARY) {
-            // Library screen lands in M1.
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("Sheaf — library (M1)")
-            }
+            LibraryScreen(
+                onOpenDocument = { id -> navController.navigate(Routes.reader(id)) },
+            )
+        }
+        composable(
+            route = Routes.READER,
+            arguments = listOf(navArgument("documentId") { type = NavType.LongType }),
+        ) { backStackEntry ->
+            val documentId = backStackEntry.arguments?.getLong("documentId") ?: return@composable
+            ReaderScreen(
+                documentId = documentId,
+                onBack = { navController.popBackStack() },
+            )
         }
     }
 }

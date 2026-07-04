@@ -4,26 +4,25 @@ import android.graphics.Bitmap
 import com.sheaf.core.domain.model.OutlineEntry
 
 /**
- * Engine-agnostic contract for rendering + reading a PDF. Two candidate implementations
- * (PDFium fork, androidx.pdf) can sit behind this; the reader UI depends only on this interface.
- * Chosen to keep the M1 render-engine decision reversible without touching UI/VM code.
+ * Engine-agnostic contract for rendering a PDF. The M1 baseline is backed by the platform
+ * PdfRenderer; PDFium / androidx.pdf can replace it without touching UI/VM code.
  */
 interface PdfRenderSource {
     val pageCount: Int
 
-    /** Renders [pageIndex] to a bitmap at the requested pixel size. Caller owns recycling. */
+    /** Renders [pageIndex] to an ARGB_8888 bitmap at the requested pixel size. */
     suspend fun renderPage(pageIndex: Int, widthPx: Int, heightPx: Int): Bitmap
 
-    /** Aspect ratio (height / width) of a page, for layout before the bitmap is ready. */
+    /** height/width of a page, so the UI can lay out the slot before the bitmap is ready. */
     fun pageAspectRatio(pageIndex: Int): Float
 
-    /** Document outline / table of contents, empty if none. */
+    /** Document outline; empty when the engine exposes none (PdfRenderer has no outline API). */
     suspend fun outline(): List<OutlineEntry>
 
     fun close()
 }
 
-/** Opens a [PdfRenderSource] for a document URI. Implemented over the chosen native engine. */
 interface PdfRenderSourceFactory {
+    /** Opens a render source for a content:// or file:// [uri]. */
     suspend fun open(uri: String): PdfRenderSource
 }

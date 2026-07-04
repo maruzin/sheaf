@@ -4,6 +4,45 @@ Running engineering log. Newest first. Every non-obvious decision gets one line 
 
 ---
 
+## M1 — Reader core (in progress, 2026-07-04)
+
+### Engine decision for the M1 baseline
+- **Render with the platform `android.graphics.pdf.PdfRenderer`** — zero external deps, compiles and
+  actually renders, so this milestone can go green on CI without an unverified native lib. Kept behind
+  `PdfRenderSource`; **PDFium / androidx.pdf remain the production-engine candidates** (benchmark for
+  large-doc perf) and swap in without touching UI/VM. The provisional `pdfium-android` catalog entry
+  is retained but unused for now.
+- *Consequence:* PdfRenderer has no text or outline API, so **full-text search, ToC, and reflow move
+  to the M1 engine-upgrade increment** (add a text-capable engine — PdfBox-Android for extraction, or
+  the chosen native engine). Baseline M1 ships: open/render/scroll, pinch-zoom, library + recents +
+  bookmarks (Room), resume position, reading themes.
+
+### Landed this session
+- **Render layer:** `PdfRenderSource` interface, `AndroidPdfRenderSource` (PdfRenderer + `Mutex` since
+  PdfRenderer allows one open page at a time; IO-dispatched; white-fill before render; aspect ratios
+  pre-read at open), `ReaderModule` DI (IO dispatcher + factory binding).
+- **Reader UI:** `ReaderScreen` — `LazyColumn` of pages, per-page lazy render keyed on size/zoom,
+  render resolution capped (memory-safe windowing), pinch-zoom, page indicator, top bar, theme bg,
+  resume via saved `ReadingPosition`.
+- **Library:** `LibraryViewModel` (recents + bookmarked via Room `combine`, SAF import with dedup by
+  uri, page-count probe), `LibraryScreen` (SAF `OpenDocument` picker with persistable permission,
+  recents/bookmarks list, empty state, bookmark toggle).
+- **Repo/data:** added `document(id)` + `findByUri` to `DocumentRepository`/DAO/impl.
+- **Nav:** `SheafNavHost` library → reader/{documentId} (typed Long arg); `MainActivity` de-duped to
+  one Scaffold per screen.
+- **Deps:** added `lifecycle-runtime-compose` (for `collectAsStateWithLifecycle`) to catalog + feature
+  convention; added `activity-compose` to `:feature:reader` for the SAF launcher.
+- Room `exportSchema=false` to avoid the schema-dir CI warning for now.
+
+### Verification status
+- Self-reviewed for compile risk (imports, brace/paren balance, API signatures) but **NOT compiled** —
+  ARM64 sandbox can't run aapt2/AGP. Awaiting first CI run once pushed to GitHub.
+
+### Remaining in M1 (next increments)
+- Full-text search, ToC/outline, reflow (needs text-capable engine — the engine-upgrade step).
+- Tabs, print, share.
+- Instrumented smoke test for open→render→scroll; unit tests for LibraryViewModel import/dedup.
+
 ## M0 — Scope & skeleton (2026-07-04)
 
 ### Name
@@ -64,6 +103,6 @@ Running engineering log. Newest first. Every non-obvious decision gets one line 
 ---
 
 ## Next step
-Open the project in Android Studio and run the first `./gradlew assembleDebug` to confirm the module
-graph + convention plugins resolve, fixing any version/wrapper nits. Then begin M1: implement the
-PDFium `PdfRenderSourceFactory`, benchmark vs androidx.pdf, and build the library + reader screens.
+Push to GitHub so Actions CI runs the first real `assembleDebug` + tests (x86_64). Fix whatever it
+flags (likely version-matrix or first-sync nits). Then finish M1: add the text-capable engine for
+search/ToC/reflow, plus tabs/print/share, and an instrumented open→render smoke test.

@@ -1,8 +1,6 @@
 package com.sheaf.core.data.db
 
 import androidx.room.Dao
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
@@ -20,6 +18,9 @@ interface DocumentDao {
 
     @Query("SELECT * FROM documents WHERE id = :id")
     suspend fun byId(id: Long): DocumentEntity?
+
+    @Query("SELECT * FROM documents WHERE uri = :uri LIMIT 1")
+    suspend fun byUri(uri: String): DocumentEntity?
 
     @Query("UPDATE documents SET isBookmarked = :bookmarked WHERE id = :id")
     suspend fun setBookmarked(id: Long, bookmarked: Boolean)

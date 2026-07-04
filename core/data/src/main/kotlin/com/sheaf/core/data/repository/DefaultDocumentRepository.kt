@@ -19,6 +19,10 @@ class DefaultDocumentRepository @Inject constructor(
     override fun observeBookmarked(): Flow<List<Document>> =
         dao.observeBookmarked().map { list -> list.map { it.toDomain() } }
 
+    override suspend fun document(id: Long): Document? = dao.byId(id)?.toDomain()
+
+    override suspend fun findByUri(uri: String): Document? = dao.byUri(uri)?.toDomain()
+
     override suspend fun upsert(document: Document): Long = dao.upsert(document.toEntity())
 
     override suspend fun setBookmarked(documentId: Long, bookmarked: Boolean) =
