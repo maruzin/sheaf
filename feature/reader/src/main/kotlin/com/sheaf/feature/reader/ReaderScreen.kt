@@ -119,6 +119,7 @@ fun ReaderScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     onManagePages: (Long) -> Unit = {},
+    onOpenDocument: (Long) -> Unit = {},
     viewModel: ReaderViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -153,6 +154,12 @@ fun ReaderScreen(
         state.compressedPath?.let { path ->
             shareFilledPdf(context, path, state.displayName)
             viewModel.onEvent(ReaderEvent.ConsumeCompressed)
+        }
+    }
+    LaunchedEffect(state.ocrDocumentId) {
+        state.ocrDocumentId?.let { id ->
+            viewModel.onEvent(ReaderEvent.ConsumeOcr)
+            onOpenDocument(id)
         }
     }
     val formByPage = remember(state.formFields) { state.formFields.groupBy { it.pageIndex } }
@@ -244,6 +251,14 @@ fun ReaderScreen(
                                 onClick = {
                                     menuOpen = false
                                     viewModel.onEvent(ReaderEvent.Compress)
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(if (state.ocrRunning) "Recognizing text…" else "Make searchable (OCR)") },
+                                enabled = !state.ocrRunning,
+                                onClick = {
+                                    menuOpen = false
+                                    viewModel.onEvent(ReaderEvent.Ocr)
                                 },
                             )
                             DropdownMenuItem(

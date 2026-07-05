@@ -4,6 +4,8 @@ import com.sheaf.feature.reader.compress.PdfBoxCompressor
 import com.sheaf.feature.reader.compress.PdfCompressor
 import com.sheaf.feature.reader.forms.PdfBoxFormReader
 import com.sheaf.feature.reader.forms.PdfFormReader
+import com.sheaf.feature.reader.ocr.MlKitPdfOcr
+import com.sheaf.feature.reader.ocr.PdfOcr
 import com.sheaf.feature.reader.pages.PdfBoxPageEditor
 import com.sheaf.feature.reader.pages.PdfPageEditor
 import com.sheaf.feature.reader.security.PdfBoxSecurity
@@ -52,4 +54,7 @@ abstract class ReaderBindingModule {
 
     @Binds
     abstract fun bindCompressor(impl: PdfBoxCompressor): PdfCompressor
+
+    @Binds
+    abstract fun bindOcr(impl: MlKitPdfOcr): PdfOcr
 }

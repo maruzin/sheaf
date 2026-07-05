@@ -47,6 +47,9 @@ data class ReaderUiState(
     // Compression
     val compressing: Boolean = false,
     val compressedPath: String? = null,
+    // OCR (make searchable)
+    val ocrRunning: Boolean = false,
+    val ocrDocumentId: Long? = null,
     // One-shot page the UI should scroll to (consumed via ConsumeScroll)
     val pendingScrollPage: Int? = null,
     val error: String? = null,
@@ -78,6 +81,8 @@ sealed interface ReaderEvent {
     data object ConsumeProtected : ReaderEvent
     data object Compress : ReaderEvent
     data object ConsumeCompressed : ReaderEvent
+    data object Ocr : ReaderEvent
+    data object ConsumeOcr : ReaderEvent
     data object ConsumeScroll : ReaderEvent
     data class JumpTo(val page: Int) : ReaderEvent
 }

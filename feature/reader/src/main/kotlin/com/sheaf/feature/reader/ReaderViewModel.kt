@@ -1,17 +1,20 @@
 package com.sheaf.feature.reader
 
 import android.graphics.Bitmap
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sheaf.core.domain.model.Annotation
 import com.sheaf.core.domain.model.AnnotationType
 import com.sheaf.core.domain.model.NormPoint
+import com.sheaf.core.domain.model.Document
 import com.sheaf.core.domain.model.ReadingPosition
 import com.sheaf.core.domain.repository.AnnotationRepository
 import com.sheaf.core.domain.repository.DocumentRepository
 import com.sheaf.core.domain.repository.SettingsRepository
 import com.sheaf.feature.reader.compress.PdfCompressor
 import com.sheaf.feature.reader.forms.PdfFormReader
+import com.sheaf.feature.reader.ocr.PdfOcr
 import com.sheaf.feature.reader.security.PdfSecurity
 import com.sheaf.feature.reader.render.PdfRenderSource
 import com.sheaf.feature.reader.render.PdfRenderSourceFactory
@@ -36,6 +39,7 @@ class ReaderViewModel @Inject constructor(
     private val formReader: PdfFormReader,
     private val security: PdfSecurity,
     private val compressor: PdfCompressor,
+    private val ocr: PdfOcr,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ReaderUiState())
@@ -72,6 +76,8 @@ class ReaderViewModel @Inject constructor(
             ReaderEvent.ConsumeProtected -> _state.update { it.copy(protectedPath = null) }
             ReaderEvent.Compress -> compress()
             ReaderEvent.ConsumeCompressed -> _state.update { it.copy(compressedPath = null) }
+            ReaderEvent.Ocr -> runOcr()
+            ReaderEvent.ConsumeOcr -> _state.update { it.copy(ocrDocumentId = null) }
             ReaderEvent.ToggleOutline -> _state.update { it.copy(outlineVisible = !it.outlineVisible) }
             ReaderEvent.ToggleAnnotationsList -> _state.update { it.copy(annotationsListVisible = !it.annotationsListVisible) }
             ReaderEvent.ToggleSearch -> _state.update {
@@ -189,6 +195,34 @@ class ReaderViewModel @Inject constructor(
             _state.update { it.copy(compressing = true) }
             val path = runCatching { compressor.compress(uri) }.getOrNull()
             _state.update { it.copy(compressing = false, compressedPath = path) }
+        }
+    }
+
+    private fun runOcr() {
+        val s = _state.value
+        if (s.uri.isBlank() || s.ocrRunning) return
+        viewModelScope.launch {
+            _state.update { it.copy(ocrRunning = true) }
+            val path = runCatching { ocr.makeSearchable(s.uri) }.getOrNull()
+            if (path == null) {
+                _state.update { it.copy(ocrRunning = false, error = "Couldn't OCR this document") }
+                return@launch
+            }
+            val fileUri = Uri.fromFile(java.io.File(path)).toString()
+            val id = runCatching {
+                repository.upsert(
+                    Document(
+                        id = 0,
+                        uri = fileUri,
+                        displayName = s.displayName.substringBeforeLast(".").ifBlank { "Document" } + " (searchable).pdf",
+                        sizeBytes = java.io.File(path).length(),
+                        pageCount = s.pageCount,
+                        lastOpenedAt = System.currentTimeMillis(),
+                        addedAt = System.currentTimeMillis(),
+                    ),
+                )
+            }.getOrNull()
+            _state.update { it.copy(ocrRunning = false, ocrDocumentId = id) }
         }
     }
 

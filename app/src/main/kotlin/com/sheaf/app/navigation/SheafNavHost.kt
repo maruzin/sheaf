@@ -61,6 +61,7 @@ fun SheafNavHost(
                 documentId = documentId,
                 onBack = { navController.popBackStack() },
                 onManagePages = { id -> navController.navigate(Routes.pages(id)) },
+                onOpenDocument = { id -> navController.navigate(Routes.reader(id)) },
             )
         }
         composable(
