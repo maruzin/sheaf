@@ -83,6 +83,8 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -141,10 +143,17 @@ fun ReaderScreen(
             viewModel.onEvent(ReaderEvent.ConsumeFilled)
         }
     }
+    LaunchedEffect(state.protectedPath) {
+        state.protectedPath?.let { path ->
+            shareFilledPdf(context, path, state.displayName)
+            viewModel.onEvent(ReaderEvent.ConsumeProtected)
+        }
+    }
     val formByPage = remember(state.formFields) { state.formFields.groupBy { it.pageIndex } }
 
     var zoom by remember { mutableFloatStateOf(1f) }
     var menuOpen by remember { mutableStateOf(false) }
+    var showProtect by remember { mutableStateOf(false) }
     var showSignatureCapture by remember { mutableStateOf(false) }
     var pendingNote by remember { mutableStateOf<Pair<Int, NormPoint>?>(null) }
     var editingNote by remember { mutableStateOf<Annotation?>(null) }
@@ -214,6 +223,13 @@ fun ReaderScreen(
                                 onClick = {
                                     menuOpen = false
                                     state.documentId?.let { onManagePages(it) }
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Protect with password") },
+                                onClick = {
+                                    menuOpen = false
+                                    showProtect = true
                                 },
                             )
                             DropdownMenuItem(
@@ -370,6 +386,17 @@ fun ReaderScreen(
         }
     }
 
+    if (showProtect) {
+        PasswordDialog(
+            busy = state.protecting,
+            onDismiss = { showProtect = false },
+            onConfirm = { pw ->
+                viewModel.onEvent(ReaderEvent.Protect(pw))
+                showProtect = false
+            },
+        )
+    }
+
     if (showSignatureCapture) {
         SignatureCaptureDialog(
             onDismiss = { showSignatureCapture = false },
@@ -425,6 +452,35 @@ private fun SignatureCaptureDialog(onDismiss: () -> Unit, onSave: (List<NormPoin
             }
         },
         confirmButton = { TextButton(onClick = { onSave(pts.toList()) }) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun PasswordDialog(busy: Boolean, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    var pw by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Protect with password") },
+        text = {
+            androidx.compose.foundation.layout.Column {
+                Text("Anyone opening the shared copy will need this password to view it.")
+                OutlinedTextField(
+                    value = pw,
+                    onValueChange = { pw = it },
+                    singleLine = true,
+                    placeholder = { Text("Password") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(pw) }, enabled = pw.isNotBlank() && !busy) {
+                Text("Protect & share")
+            }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

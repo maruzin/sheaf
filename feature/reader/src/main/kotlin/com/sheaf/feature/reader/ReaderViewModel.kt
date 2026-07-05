@@ -11,6 +11,7 @@ import com.sheaf.core.domain.repository.AnnotationRepository
 import com.sheaf.core.domain.repository.DocumentRepository
 import com.sheaf.core.domain.repository.SettingsRepository
 import com.sheaf.feature.reader.forms.PdfFormReader
+import com.sheaf.feature.reader.security.PdfSecurity
 import com.sheaf.feature.reader.render.PdfRenderSource
 import com.sheaf.feature.reader.render.PdfRenderSourceFactory
 import com.sheaf.feature.reader.search.PdfOutlineExtractor
@@ -32,6 +33,7 @@ class ReaderViewModel @Inject constructor(
     private val annotationRepo: AnnotationRepository,
     private val settings: SettingsRepository,
     private val formReader: PdfFormReader,
+    private val security: PdfSecurity,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ReaderUiState())
@@ -64,6 +66,8 @@ class ReaderViewModel @Inject constructor(
                 _state.update { it.copy(formValues = it.formValues + (event.name to event.value)) }
             ReaderEvent.SaveForm -> saveForm()
             ReaderEvent.ConsumeFilled -> _state.update { it.copy(filledUri = null) }
+            is ReaderEvent.Protect -> protect(event.password)
+            ReaderEvent.ConsumeProtected -> _state.update { it.copy(protectedPath = null) }
             ReaderEvent.ToggleOutline -> _state.update { it.copy(outlineVisible = !it.outlineVisible) }
             ReaderEvent.ToggleAnnotationsList -> _state.update { it.copy(annotationsListVisible = !it.annotationsListVisible) }
             ReaderEvent.ToggleSearch -> _state.update {
@@ -161,6 +165,16 @@ class ReaderViewModel @Inject constructor(
             _state.update { it.copy(savingForm = true) }
             val out = runCatching { formReader.fillAndSave(uri, _state.value.formValues) }.getOrNull()
             _state.update { it.copy(savingForm = false, filledUri = out) }
+        }
+    }
+
+    private fun protect(password: String) {
+        val uri = _state.value.uri
+        if (uri.isBlank() || password.isBlank()) return
+        viewModelScope.launch {
+            _state.update { it.copy(protecting = true) }
+            val path = runCatching { security.encrypt(uri, password) }.getOrNull()
+            _state.update { it.copy(protecting = false, protectedPath = path) }
         }
     }
 

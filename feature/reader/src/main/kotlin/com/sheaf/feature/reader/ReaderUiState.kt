@@ -41,6 +41,9 @@ data class ReaderUiState(
     val formValues: Map<String, String> = emptyMap(),
     val savingForm: Boolean = false,
     val filledUri: String? = null,
+    // Security
+    val protecting: Boolean = false,
+    val protectedPath: String? = null,
     // One-shot page the UI should scroll to (consumed via ConsumeScroll)
     val pendingScrollPage: Int? = null,
     val error: String? = null,
@@ -68,6 +71,8 @@ sealed interface ReaderEvent {
     data class SetFormValue(val name: String, val value: String) : ReaderEvent
     data object SaveForm : ReaderEvent
     data object ConsumeFilled : ReaderEvent
+    data class Protect(val password: String) : ReaderEvent
+    data object ConsumeProtected : ReaderEvent
     data object ConsumeScroll : ReaderEvent
     data class JumpTo(val page: Int) : ReaderEvent
 }

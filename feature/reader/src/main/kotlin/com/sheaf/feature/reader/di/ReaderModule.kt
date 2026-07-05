@@ -4,6 +4,8 @@ import com.sheaf.feature.reader.forms.PdfBoxFormReader
 import com.sheaf.feature.reader.forms.PdfFormReader
 import com.sheaf.feature.reader.pages.PdfBoxPageEditor
 import com.sheaf.feature.reader.pages.PdfPageEditor
+import com.sheaf.feature.reader.security.PdfBoxSecurity
+import com.sheaf.feature.reader.security.PdfSecurity
 import com.sheaf.feature.reader.render.AndroidPdfRenderSource
 import com.sheaf.feature.reader.render.PdfRenderSourceFactory
 import com.sheaf.feature.reader.search.PdfBoxOutlineExtractor
@@ -42,4 +44,7 @@ abstract class ReaderBindingModule {
 
     @Binds
     abstract fun bindPageEditor(impl: PdfBoxPageEditor): PdfPageEditor
+
+    @Binds
+    abstract fun bindSecurity(impl: PdfBoxSecurity): PdfSecurity
 }
