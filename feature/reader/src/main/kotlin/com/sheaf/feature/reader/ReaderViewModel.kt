@@ -86,6 +86,9 @@ class ReaderViewModel @Inject constructor(
             ReaderEvent.ConsumeOcr -> _state.update { it.copy(ocrDocumentId = null) }
             ReaderEvent.ShowPaywall -> _state.update { it.copy(showPaywall = true) }
             ReaderEvent.DismissPaywall -> _state.update { it.copy(showPaywall = false) }
+            is ReaderEvent.SubmitOpenPassword -> submitOpenPassword(event.password)
+            ReaderEvent.CancelOpenPassword ->
+                _state.update { it.copy(needsPassword = false, error = "Couldn't open this document") }
             ReaderEvent.ToggleOutline -> _state.update { it.copy(outlineVisible = !it.outlineVisible) }
             ReaderEvent.ToggleAnnotationsList -> _state.update { it.copy(annotationsListVisible = !it.annotationsListVisible) }
             ReaderEvent.ToggleSearch -> _state.update {
@@ -101,34 +104,52 @@ class ReaderViewModel @Inject constructor(
         }
     }
 
+    private var openPassword: String? = null
+
     private fun open(documentId: Long) {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, documentId = documentId, error = null) }
-            runCatching {
-                val doc = repository.document(documentId) ?: error("Document not found")
-                val opened = renderFactory.open(doc.uri)
-                source = opened
-                val restored = repository.readingPosition(documentId)
+            val doc = repository.document(documentId)
+            if (doc == null) {
+                _state.update { it.copy(isLoading = false, error = "Document not found") }
+                return@launch
+            }
+            val opened = runCatching { renderFactory.open(doc.uri, openPassword) }.getOrNull()
+            if (opened == null) {
+                // Most likely password-protected (PDFium throws on a wrong/missing password).
                 _state.update {
                     it.copy(
                         isLoading = false,
-                        uri = doc.uri,
-                        displayName = doc.displayName,
-                        pageCount = opened.pageCount,
-                        currentPage = restored?.pageIndex ?: 0,
-                        zoom = restored?.zoom ?: 1f,
-                        outline = opened.outline(),
+                        needsPassword = true,
+                        passwordError = if (openPassword != null) "Incorrect password — try again" else null,
                     )
                 }
-                loadOutline(doc.uri)
-                observeAnnotations(documentId)
-                loadForms(doc.uri)
-            }.onFailure { t ->
-                _state.update {
-                    it.copy(isLoading = false, error = t.message ?: "Failed to open document")
-                }
+                return@launch
             }
+            source = opened
+            val restored = repository.readingPosition(documentId)
+            _state.update {
+                it.copy(
+                    isLoading = false,
+                    needsPassword = false,
+                    passwordError = null,
+                    uri = doc.uri,
+                    displayName = doc.displayName,
+                    pageCount = opened.pageCount,
+                    currentPage = restored?.pageIndex ?: 0,
+                    zoom = restored?.zoom ?: 1f,
+                    outline = opened.outline(),
+                )
+            }
+            loadOutline(doc.uri)
+            observeAnnotations(documentId)
+            loadForms(doc.uri)
         }
+    }
+
+    private fun submitOpenPassword(password: String) {
+        openPassword = password
+        _state.value.documentId?.let { open(it) }
     }
 
     private fun runSearch(query: String) {

@@ -9,7 +9,7 @@ val Project.libs: VersionCatalog
     get() = extensions.getByType<VersionCatalogsExtension>().named("libs")
 
 object AppConfig {
-    const val COMPILE_SDK = 35
+    const val COMPILE_SDK = 36
     const val MIN_SDK = 26
     const val TARGET_SDK = 35
     const val APPLICATION_ID = "com.sheaf.app"

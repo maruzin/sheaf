@@ -2,7 +2,7 @@
 # NOTE (M0): these versions are a coherent, current-stable matrix chosen without a live Gradle sync
 # in this environment. Confirm on first Android Studio sync; bump as needed and log in BUILD_NOTES.
 [versions]
-agp = "8.7.3"
+agp = "8.9.1"
 kotlin = "2.1.0"
 ksp = "2.1.0-1.0.29"
 coreKtx = "1.15.0"

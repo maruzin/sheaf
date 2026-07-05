@@ -53,6 +53,9 @@ data class ReaderUiState(
     // Freemium
     val isPro: Boolean = false,
     val showPaywall: Boolean = false,
+    // Encrypted-document open flow
+    val needsPassword: Boolean = false,
+    val passwordError: String? = null,
     // One-shot page the UI should scroll to (consumed via ConsumeScroll)
     val pendingScrollPage: Int? = null,
     val error: String? = null,
@@ -88,6 +91,8 @@ sealed interface ReaderEvent {
     data object ConsumeOcr : ReaderEvent
     data object ShowPaywall : ReaderEvent
     data object DismissPaywall : ReaderEvent
+    data class SubmitOpenPassword(val password: String) : ReaderEvent
+    data object CancelOpenPassword : ReaderEvent
     data object ConsumeScroll : ReaderEvent
     data class JumpTo(val page: Int) : ReaderEvent
 }

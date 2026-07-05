@@ -429,6 +429,17 @@ fun ReaderScreen(
         }
     }
 
+    if (state.needsPassword) {
+        OpenPasswordDialog(
+            error = state.passwordError,
+            onSubmit = { viewModel.onEvent(ReaderEvent.SubmitOpenPassword(it)) },
+            onCancel = {
+                viewModel.onEvent(ReaderEvent.CancelOpenPassword)
+                onBack()
+            },
+        )
+    }
+
     if (state.showPaywall) {
         PaywallDialog(
             onDismiss = { viewModel.onEvent(ReaderEvent.DismissPaywall) },
@@ -507,6 +518,37 @@ private fun SignatureCaptureDialog(onDismiss: () -> Unit, onSave: (List<NormPoin
 }
 
 private fun proLabel(text: String, isPro: Boolean): String = if (isPro) text else "$text  ·  PRO"
+
+@Composable
+private fun OpenPasswordDialog(error: String?, onSubmit: (String) -> Unit, onCancel: () -> Unit) {
+    var pw by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Password required") },
+        text = {
+            androidx.compose.foundation.layout.Column {
+                Text("This document is protected. Enter its password to open it.")
+                if (error != null) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(error, color = MaterialTheme.colorScheme.error)
+                }
+                OutlinedTextField(
+                    value = pw,
+                    onValueChange = { pw = it },
+                    singleLine = true,
+                    placeholder = { Text("Password") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSubmit(pw) }, enabled = pw.isNotBlank()) { Text("Open") }
+        },
+        dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
+    )
+}
 
 @Composable
 private fun PaywallDialog(onDismiss: () -> Unit, onUpgrade: () -> Unit) {
