@@ -9,6 +9,8 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material.icons.extended)
+    // PDFium (io.legere) — production page renderer (supports password-protected PDFs).
+    implementation(libs.pdfium.android)
     // Text engine for full-text search + (later) outline extraction.
     implementation(libs.pdfbox.android)
     // M5: on-device document scanner (capture, auto-crop, multi-page → PDF) + OCR text recognition.

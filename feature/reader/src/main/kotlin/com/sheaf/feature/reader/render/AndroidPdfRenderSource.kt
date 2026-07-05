@@ -62,7 +62,7 @@ class AndroidPdfRenderSource private constructor(
         @ApplicationContext private val context: Context,
         private val io: CoroutineDispatcher,
     ) : PdfRenderSourceFactory {
-        override suspend fun open(uri: String): PdfRenderSource = withContext(io) {
+        override suspend fun open(uri: String, password: String?): PdfRenderSource = withContext(io) {
             val pfd = context.contentResolver.openFileDescriptor(Uri.parse(uri), "r")
                 ?: error("Could not open $uri")
             val renderer = PdfRenderer(pfd)

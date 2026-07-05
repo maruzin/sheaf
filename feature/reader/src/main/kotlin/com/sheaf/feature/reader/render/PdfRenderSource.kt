@@ -23,6 +23,6 @@ interface PdfRenderSource {
 }
 
 interface PdfRenderSourceFactory {
-    /** Opens a render source for a content:// or file:// [uri]. */
-    suspend fun open(uri: String): PdfRenderSource
+    /** Opens a render source for a content:// or file:// [uri], optionally decrypting with [password]. */
+    suspend fun open(uri: String, password: String? = null): PdfRenderSource
 }
