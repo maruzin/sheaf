@@ -11,7 +11,6 @@ import com.sheaf.feature.reader.pages.PdfPageEditor
 import com.sheaf.feature.reader.security.PdfBoxSecurity
 import com.sheaf.feature.reader.security.PdfSecurity
 import com.sheaf.feature.reader.render.AndroidPdfRenderSource
-import com.sheaf.feature.reader.render.PdfiumRenderSource
 import com.sheaf.feature.reader.render.PdfRenderSourceFactory
 import com.sheaf.feature.reader.search.PdfBoxOutlineExtractor
 import com.sheaf.feature.reader.search.PdfBoxTextSearcher
@@ -36,7 +35,7 @@ object ReaderDispatcherModule {
 @InstallIn(SingletonComponent::class)
 abstract class ReaderBindingModule {
     @Binds
-    abstract fun bindRenderFactory(impl: PdfiumRenderSource.Factory): PdfRenderSourceFactory
+    abstract fun bindRenderFactory(impl: AndroidPdfRenderSource.Factory): PdfRenderSourceFactory
 
     @Binds
     abstract fun bindTextSearcher(impl: PdfBoxTextSearcher): PdfTextSearcher

@@ -168,3 +168,14 @@ search/ToC/reflow, plus tabs/print/share, and an instrumented open→render smok
   ML Kit, Play Services, Billing + coroutines dontwarn.
 - Extracted pure `PageReducer` (rotate/delete/move) + `PageReducerTest` (runs in CI `testDebugUnitTest`).
 - Strict lint (`abortOnError`) intentionally left off to keep the CI loop fast; revisit before store submission.
+
+## PDFium migration — ATTEMPTED, REVERTED (renderer stays on platform PdfRenderer)
+- Tried io.legere `pdfiumandroid` for faster render + in-app password unlock. Blocker: PDFium 2.x
+  (2.0.0/2.0.1) is built with **Kotlin 2.3** (`kotlin-stdlib 2.3.x`), unreadable by our Kotlin 2.1.0
+  compiler (KSP failed: "metadata 2.3.0, expected 2.1.0"). The 1.0.x line risks Play's 16KB native-lib
+  rule + has an unverified API. Upgrading the project to Kotlin 2.3 cascades (KSP, Hilt) — too risky
+  right before release, so **reverted** to the proven platform renderer (AGP 8.7.3 / compileSdk 35).
+- Kept the release plumbing from this phase: `signingConfig` via gitignored `keystore.properties`,
+  `INTERNET` permission, and `docs/` (PRIVACY_POLICY, PLAY_CONSOLE_GUIDE, RELEASE_BUILD).
+- Follow-up (optional): bump to Kotlin 2.3 + KSP + compileSdk 36, then re-add PDFium 2.x behind the
+  unchanged `PdfRenderSource` seam. Password-protected docs remain not-openable in-app until then.

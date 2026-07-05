@@ -114,16 +114,9 @@ class ReaderViewModel @Inject constructor(
                 _state.update { it.copy(isLoading = false, error = "Document not found") }
                 return@launch
             }
-            val opened = runCatching { renderFactory.open(doc.uri, openPassword) }.getOrNull()
+            val opened = runCatching { renderFactory.open(doc.uri) }.getOrNull()
             if (opened == null) {
-                // Most likely password-protected (PDFium throws on a wrong/missing password).
-                _state.update {
-                    it.copy(
-                        isLoading = false,
-                        needsPassword = true,
-                        passwordError = if (openPassword != null) "Incorrect password — try again" else null,
-                    )
-                }
+                _state.update { it.copy(isLoading = false, error = "Couldn't open this document") }
                 return@launch
             }
             source = opened

@@ -2,7 +2,7 @@
 # NOTE (M0): these versions are a coherent, current-stable matrix chosen without a live Gradle sync
 # in this environment. Confirm on first Android Studio sync; bump as needed and log in BUILD_NOTES.
 [versions]
-agp = "8.9.1"
+agp = "8.7.3"
 kotlin = "2.1.0"
 ksp = "2.1.0-1.0.29"
 coreKtx = "1.15.0"
@@ -19,7 +19,7 @@ camerax = "1.4.1"
 mlkitDocScanner = "16.0.0-beta1"
 mlkitTextRecognition = "16.0.1"
 billing = "7.1.1"
-pdfiumAndroid = "2.0.1"           # PDFium (io.legere) — production renderer, supports password PDFs
+pdfiumAndroid = "2.0.1"           # UNUSED — PDFium deferred (needs Kotlin 2.3 + compileSdk 36)
 pdfboxAndroid = "2.0.27.0"
 coil = "2.7.0"
 junit = "4.13.2"
