@@ -762,7 +762,7 @@ private fun FormFieldOverlay(
     values: Map<String, String>,
     onValue: (String, String) -> Unit,
 ) {
-    BoxWithConstraints(Modifier.matchParentSize()) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
         val w = maxWidth
         val h = maxHeight
         fields.forEach { f ->
