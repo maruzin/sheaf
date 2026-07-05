@@ -109,6 +109,10 @@ class ReaderViewModel @Inject constructor(
 
     private var openPassword: String? = null
 
+    // The uri used for PdfBox text operations (search/outline/forms). Equals the document uri, or a
+    // decrypted temp copy when the document is password-protected.
+    private var textUri: String = ""
+
     private fun open(documentId: Long) {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, documentId = documentId, error = null) }
@@ -117,13 +121,38 @@ class ReaderViewModel @Inject constructor(
                 _state.update { it.copy(isLoading = false, error = "Document not found") }
                 return@launch
             }
-            val opened = runCatching { renderFactory.open(doc.uri) }.getOrNull()
+            // If a password was supplied for a protected PDF, decrypt to a temp file and render that.
+            val password = openPassword
+            val renderUri: String
+            if (password != null) {
+                val decrypted = runCatching { security.decrypt(doc.uri, password) }.getOrNull()
+                if (decrypted == null) {
+                    _state.update {
+                        it.copy(isLoading = false, needsPassword = true, passwordError = "Incorrect password — try again")
+                    }
+                    return@launch
+                }
+                renderUri = android.net.Uri.fromFile(java.io.File(decrypted)).toString()
+            } else {
+                renderUri = doc.uri
+            }
+            val result = runCatching { renderFactory.open(renderUri) }
+            val opened = result.getOrNull()
             if (opened == null) {
-                _state.update { it.copy(isLoading = false, error = "Couldn't open this document") }
+                // PdfRenderer throws SecurityException for password-protected PDFs — prompt for a password.
+                val encrypted = result.exceptionOrNull() is SecurityException
+                _state.update {
+                    it.copy(
+                        isLoading = false,
+                        needsPassword = encrypted,
+                        error = if (encrypted) null else "Couldn't open this document",
+                    )
+                }
                 return@launch
             }
             source?.close() // release the previous renderer + file descriptor before replacing it
             source = opened
+            textUri = renderUri
             val restored = repository.readingPosition(documentId)
             _state.update {
                 it.copy(
@@ -138,9 +167,9 @@ class ReaderViewModel @Inject constructor(
                     outline = opened.outline(),
                 )
             }
-            loadOutline(doc.uri)
+            loadOutline(textUri)
             observeAnnotations(documentId)
-            loadForms(doc.uri)
+            loadForms(textUri)
         }
     }
 
@@ -150,7 +179,7 @@ class ReaderViewModel @Inject constructor(
     }
 
     private fun runSearch(query: String) {
-        val uri = _state.value.uri
+        val uri = textUri.ifBlank { _state.value.uri }
         _state.update { it.copy(searchQuery = query) }
         if (query.isBlank() || uri.isBlank()) {
             _state.update { it.copy(searchResults = emptyList(), searching = false) }

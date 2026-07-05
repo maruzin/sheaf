@@ -173,6 +173,8 @@ fun ReaderScreen(
     val formByPage = remember(state.formFields) { state.formFields.groupBy { it.pageIndex } }
 
     var zoom by remember { mutableFloatStateOf(1f) }
+    // Restore the saved zoom once the document has loaded.
+    LaunchedEffect(state.uri) { if (state.uri.isNotBlank()) zoom = state.zoom }
     var menuOpen by remember { mutableStateOf(false) }
     var showProtect by remember { mutableStateOf(false) }
     var showSignatureCapture by remember { mutableStateOf(false) }
@@ -347,7 +349,10 @@ fun ReaderScreen(
                     noteMode = state.noteMode,
                     inkColor = Color(state.inkColorArgb),
                     annotationsByPage = state.annotationsByPage,
-                    onZoom = { factor -> zoom = (zoom * factor).coerceIn(1f, 5f) },
+                    onZoom = { factor ->
+                        zoom = (zoom * factor).coerceIn(1f, 5f)
+                        viewModel.onEvent(ReaderEvent.ZoomChanged(zoom))
+                    },
                     onStroke = { page, pts -> viewModel.saveStroke(page, pts) },
                     onTapNote = { page, pt -> pendingNote = page to pt },
                     onEditNote = { ann -> editingNote = ann },

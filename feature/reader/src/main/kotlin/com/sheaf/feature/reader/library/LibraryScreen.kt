@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -97,10 +98,12 @@ fun LibraryScreen(
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             val scan = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
-            scan?.pdf?.uri?.let { pdfUri ->
-                importScannedPdf(context, pdfUri)?.let { (uri, name, size) ->
-                    viewModel.onDocumentPicked(uri, name, size)
-                }
+            val pdfUri = scan?.pdf?.uri
+            val imported = pdfUri?.let { importScannedPdf(context, it) }
+            if (imported != null) {
+                viewModel.onDocumentPicked(imported.first, imported.second, imported.third)
+            } else if (pdfUri != null) {
+                Toast.makeText(context, "Couldn't import the scan", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -109,6 +112,9 @@ fun LibraryScreen(
             scanner.getStartScanIntent(activity)
                 .addOnSuccessListener { sender ->
                     scanLauncher.launch(IntentSenderRequest.Builder(sender).build())
+                }
+                .addOnFailureListener {
+                    Toast.makeText(context, "Scanner isn't available on this device", Toast.LENGTH_LONG).show()
                 }
         }
     }
