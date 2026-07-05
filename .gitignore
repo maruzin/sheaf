@@ -31,3 +31,8 @@ secrets.properties
 sheaf-ai.properties
 # Logs
 *.log
+
+# Release signing secrets — never commit
+keystore.properties
+*.jks
+*.keystore

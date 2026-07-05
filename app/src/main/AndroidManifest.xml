@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Google Play Billing needs network access. Scanning/OCR run on-device; no CAMERA permission is
+         required because the ML Kit document scanner runs in Google Play services' own UI. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:name=".SheafApplication"
         android:allowBackup="true"
