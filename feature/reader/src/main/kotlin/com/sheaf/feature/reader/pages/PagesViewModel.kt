@@ -56,21 +56,12 @@ class PagesViewModel @Inject constructor(
 
     fun aspectRatio(sourceIndex: Int): Float = source?.pageAspectRatio(sourceIndex) ?: 1.4142f
 
-    fun rotate(position: Int) = _state.update { s ->
-        s.copy(items = s.items.mapIndexed { i, it -> if (i == position) it.copy(rotation = (it.rotation + 90) % 360) else it })
-    }
+    fun rotate(position: Int) = _state.update { it.copy(items = PageReducer.rotate(it.items, position)) }
 
-    fun delete(position: Int) = _state.update { s ->
-        if (s.items.size <= 1) s else s.copy(items = s.items.filterIndexed { i, _ -> i != position })
-    }
+    fun delete(position: Int) = _state.update { it.copy(items = PageReducer.delete(it.items, position)) }
 
-    fun move(position: Int, delta: Int) = _state.update { s ->
-        val target = position + delta
-        if (target < 0 || target >= s.items.size) return@update s
-        val list = s.items.toMutableList()
-        val tmp = list[position]; list[position] = list[target]; list[target] = tmp
-        s.copy(items = list)
-    }
+    fun move(position: Int, delta: Int) =
+        _state.update { it.copy(items = PageReducer.move(it.items, position, delta)) }
 
     fun save() {
         val s = _state.value

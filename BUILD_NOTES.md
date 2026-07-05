@@ -153,3 +153,18 @@ search/ToC/reflow, plus tabs/print/share, and an instrumented open→render smok
 - **Reduce file size**: `PdfBoxCompressor` downsamples embedded images (>1600px longest edge) and re-encodes
   JPEG q=0.6 via `JPEGFactory`, replacing XObjects in page resources → share smaller copy.
 - All three share via the FileProvider added in M3.
+
+## M7 — Freemium billing (COMPLETE, CI-green)
+- `BillingManager` (core:data, @Singleton) wraps Play Billing v7: one-time `sheaf_pro` INAPP unlock,
+  `enablePendingPurchases(PendingPurchasesParams)`, suspend ktx (`queryProductDetails`, `queryPurchasesAsync`,
+  `acknowledgePurchase`). Entitlement persisted via `SettingsRepository.isPro` (DataStore key `is_pro`),
+  restored on launch from `SheafApplication.onCreate` → `billingManager.start()`.
+- Reader gates **OCR, compression, password protection** behind Pro: menu items show "· PRO" and open a
+  `PaywallDialog`; `upgrade(activity)` launches the purchase flow. VM has a `blockedByPaywall()` safety net.
+- GATE (runtime only): live purchase needs the `sheaf_pro` product in Play Console + a signed build.
+
+## M8 — Hardening (in progress)
+- Release build already minifies + shrinks; wrote real `proguard-rules.pro` keeps for PdfBox (com.tom_roush.**),
+  ML Kit, Play Services, Billing + coroutines dontwarn.
+- Extracted pure `PageReducer` (rotate/delete/move) + `PageReducerTest` (runs in CI `testDebugUnitTest`).
+- Strict lint (`abortOnError`) intentionally left off to keep the CI loop fast; revisit before store submission.
