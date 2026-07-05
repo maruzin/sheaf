@@ -14,6 +14,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -26,11 +27,23 @@ import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+    private val incomingUri = mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        val incoming = incomingPdfUri(intent)
-        setContent { SheafApp(incomingUri = incoming) }
+        incomingUri.value = incomingPdfUri(intent)
+        setContent {
+            val uri by incomingUri
+            SheafApp(incomingUri = uri)
+        }
+    }
+
+    // Handle "Open with" while the app is already running.
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        incomingUri.value = incomingPdfUri(intent)
     }
 }
 

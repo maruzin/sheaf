@@ -2,6 +2,7 @@ package com.sheaf.feature.reader.library
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToInt
 
@@ -39,6 +41,13 @@ class LibraryViewModel @Inject constructor(
     suspend fun thumbnail(uriString: String, widthPx: Int): Bitmap? {
         thumbs[uriString]?.let { return it }
         return withContext(Dispatchers.IO) {
+            val cacheFile = File(context.cacheDir, "thumbs/${uriString.hashCode()}_$widthPx.png")
+            if (cacheFile.exists()) {
+                BitmapFactory.decodeFile(cacheFile.path)?.let { cached ->
+                    thumbs[uriString] = cached
+                    return@withContext cached
+                }
+            }
             runCatching {
                 context.contentResolver.openFileDescriptor(Uri.parse(uriString), "r")?.use { pfd ->
                     PdfRenderer(pfd).use { renderer ->
@@ -53,7 +62,13 @@ class LibraryViewModel @Inject constructor(
                         }
                     }
                 }
-            }.getOrNull()?.also { thumbs[uriString] = it }
+            }.getOrNull()?.also { bmp ->
+                thumbs[uriString] = bmp
+                runCatching {
+                    cacheFile.parentFile?.mkdirs()
+                    cacheFile.outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                }
+            }
         }
     }
 

@@ -68,11 +68,6 @@ dependencies {
     implementation(project(":core:data"))
     // Features
     implementation(project(":feature:reader"))
-    implementation(project(":feature:annotate"))
-    implementation(project(":feature:pages"))
-    implementation(project(":feature:scan"))
-    implementation(project(":feature:ai"))
-    implementation(project(":feature:billing"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

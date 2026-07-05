@@ -37,15 +37,13 @@ class PdfBoxCompressor @Inject constructor(
                                 if (xobj is PDImageXObject) {
                                     val bmp = xobj.image ?: return@runCatching
                                     val longest = max(bmp.width, bmp.height)
-                                    if (longest <= 0) return@runCatching
-                                    val scale = if (longest > MAX_DIM) MAX_DIM.toFloat() / longest else 1f
-                                    val scaled = if (scale < 1f) {
-                                        val nw = (bmp.width * scale).roundToInt().coerceAtLeast(1)
-                                        val nh = (bmp.height * scale).roundToInt().coerceAtLeast(1)
-                                        Bitmap.createScaledBitmap(bmp, nw, nh, true)
-                                    } else {
-                                        bmp
-                                    }
+                                    // Only touch large, opaque images: re-encoding small ones can inflate
+                                    // size, and JPEG would flatten transparency (e.g. logos -> black boxes).
+                                    if (longest <= MAX_DIM || bmp.hasAlpha()) return@runCatching
+                                    val scale = MAX_DIM.toFloat() / longest
+                                    val nw = (bmp.width * scale).roundToInt().coerceAtLeast(1)
+                                    val nh = (bmp.height * scale).roundToInt().coerceAtLeast(1)
+                                    val scaled = Bitmap.createScaledBitmap(bmp, nw, nh, true)
                                     val newImage = JPEGFactory.createFromImage(doc, scaled, JPEG_QUALITY)
                                     res.put(name, newImage)
                                 }
