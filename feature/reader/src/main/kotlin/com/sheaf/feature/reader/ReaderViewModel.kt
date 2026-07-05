@@ -14,6 +14,7 @@ import com.sheaf.core.domain.repository.AnnotationRepository
 import com.sheaf.core.domain.repository.DocumentRepository
 import com.sheaf.core.domain.repository.SettingsRepository
 import com.sheaf.feature.reader.compress.PdfCompressor
+import com.sheaf.feature.reader.flatten.AnnotationFlattener
 import com.sheaf.feature.reader.forms.PdfFormReader
 import com.sheaf.core.data.billing.BillingManager
 import com.sheaf.feature.reader.ocr.PdfOcr
@@ -43,6 +44,7 @@ class ReaderViewModel @Inject constructor(
     private val compressor: PdfCompressor,
     private val ocr: PdfOcr,
     private val billing: BillingManager,
+    private val flattener: AnnotationFlattener,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ReaderUiState())
@@ -86,6 +88,8 @@ class ReaderViewModel @Inject constructor(
             ReaderEvent.ConsumeCompressed -> _state.update { it.copy(compressedPath = null) }
             ReaderEvent.Ocr -> runOcr()
             ReaderEvent.ConsumeOcr -> _state.update { it.copy(ocrDocumentId = null) }
+            ReaderEvent.FlattenShare -> flattenAndShare()
+            ReaderEvent.ConsumeFlattened -> _state.update { it.copy(flattenedPath = null) }
             ReaderEvent.ShowPaywall -> _state.update { it.copy(showPaywall = true) }
             ReaderEvent.DismissPaywall -> _state.update { it.copy(showPaywall = false) }
             ReaderEvent.ConsumeBillingMessage -> _state.update { it.copy(billingMessage = null) }
@@ -268,6 +272,17 @@ class ReaderViewModel @Inject constructor(
             _state.update { it.copy(compressing = true) }
             val path = runCatching { compressor.compress(uri) }.getOrNull()
             _state.update { it.copy(compressing = false, compressedPath = path) }
+        }
+    }
+
+    private fun flattenAndShare() {
+        val uri = textUri.ifBlank { _state.value.uri }
+        val ann = _state.value.annotationsByPage
+        if (uri.isBlank() || ann.isEmpty()) return
+        viewModelScope.launch {
+            _state.update { it.copy(flattening = true) }
+            val path = runCatching { flattener.flatten(uri, ann) }.getOrNull()
+            _state.update { it.copy(flattening = false, flattenedPath = path) }
         }
     }
 

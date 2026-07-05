@@ -170,6 +170,12 @@ fun ReaderScreen(
             viewModel.onEvent(ReaderEvent.ConsumeBillingMessage)
         }
     }
+    LaunchedEffect(state.flattenedPath) {
+        state.flattenedPath?.let { path ->
+            shareFilledPdf(context, path, state.displayName)
+            viewModel.onEvent(ReaderEvent.ConsumeFlattened)
+        }
+    }
     val formByPage = remember(state.formFields) { state.formFields.groupBy { it.pageIndex } }
 
     var zoom by remember { mutableFloatStateOf(1f) }
@@ -248,6 +254,16 @@ fun ReaderScreen(
                                     state.documentId?.let { onManagePages(it) }
                                 },
                             )
+                            if (state.annotationsByPage.isNotEmpty()) {
+                                DropdownMenuItem(
+                                    text = { Text(if (state.flattening) "Preparing…" else "Share with markup") },
+                                    enabled = !state.flattening,
+                                    onClick = {
+                                        menuOpen = false
+                                        viewModel.onEvent(ReaderEvent.FlattenShare)
+                                    },
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text(proLabel("Protect with password", state.isPro)) },
                                 onClick = {

@@ -50,6 +50,9 @@ data class ReaderUiState(
     // OCR (make searchable)
     val ocrRunning: Boolean = false,
     val ocrDocumentId: Long? = null,
+    // Flatten annotations/signature into the PDF for sharing
+    val flattening: Boolean = false,
+    val flattenedPath: String? = null,
     // Freemium
     val isPro: Boolean = false,
     val showPaywall: Boolean = false,
@@ -90,6 +93,8 @@ sealed interface ReaderEvent {
     data object ConsumeCompressed : ReaderEvent
     data object Ocr : ReaderEvent
     data object ConsumeOcr : ReaderEvent
+    data object FlattenShare : ReaderEvent
+    data object ConsumeFlattened : ReaderEvent
     data object ShowPaywall : ReaderEvent
     data object DismissPaywall : ReaderEvent
     data object ConsumeBillingMessage : ReaderEvent

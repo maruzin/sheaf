@@ -2,6 +2,8 @@ package com.sheaf.feature.reader.di
 
 import com.sheaf.feature.reader.compress.PdfBoxCompressor
 import com.sheaf.feature.reader.compress.PdfCompressor
+import com.sheaf.feature.reader.flatten.AnnotationFlattener
+import com.sheaf.feature.reader.flatten.PdfBoxAnnotationFlattener
 import com.sheaf.feature.reader.forms.PdfBoxFormReader
 import com.sheaf.feature.reader.forms.PdfFormReader
 import com.sheaf.feature.reader.ocr.MlKitPdfOcr
@@ -57,4 +59,7 @@ abstract class ReaderBindingModule {
 
     @Binds
     abstract fun bindOcr(impl: MlKitPdfOcr): PdfOcr
+
+    @Binds
+    abstract fun bindFlattener(impl: PdfBoxAnnotationFlattener): AnnotationFlattener
 }
