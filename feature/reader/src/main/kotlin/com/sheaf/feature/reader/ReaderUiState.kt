@@ -44,6 +44,9 @@ data class ReaderUiState(
     // Security
     val protecting: Boolean = false,
     val protectedPath: String? = null,
+    // Compression
+    val compressing: Boolean = false,
+    val compressedPath: String? = null,
     // One-shot page the UI should scroll to (consumed via ConsumeScroll)
     val pendingScrollPage: Int? = null,
     val error: String? = null,
@@ -73,6 +76,8 @@ sealed interface ReaderEvent {
     data object ConsumeFilled : ReaderEvent
     data class Protect(val password: String) : ReaderEvent
     data object ConsumeProtected : ReaderEvent
+    data object Compress : ReaderEvent
+    data object ConsumeCompressed : ReaderEvent
     data object ConsumeScroll : ReaderEvent
     data class JumpTo(val page: Int) : ReaderEvent
 }

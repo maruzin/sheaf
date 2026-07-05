@@ -1,5 +1,7 @@
 package com.sheaf.feature.reader.di
 
+import com.sheaf.feature.reader.compress.PdfBoxCompressor
+import com.sheaf.feature.reader.compress.PdfCompressor
 import com.sheaf.feature.reader.forms.PdfBoxFormReader
 import com.sheaf.feature.reader.forms.PdfFormReader
 import com.sheaf.feature.reader.pages.PdfBoxPageEditor
@@ -47,4 +49,7 @@ abstract class ReaderBindingModule {
 
     @Binds
     abstract fun bindSecurity(impl: PdfBoxSecurity): PdfSecurity
+
+    @Binds
+    abstract fun bindCompressor(impl: PdfBoxCompressor): PdfCompressor
 }

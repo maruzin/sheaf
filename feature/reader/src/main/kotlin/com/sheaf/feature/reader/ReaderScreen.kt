@@ -149,6 +149,12 @@ fun ReaderScreen(
             viewModel.onEvent(ReaderEvent.ConsumeProtected)
         }
     }
+    LaunchedEffect(state.compressedPath) {
+        state.compressedPath?.let { path ->
+            shareFilledPdf(context, path, state.displayName)
+            viewModel.onEvent(ReaderEvent.ConsumeCompressed)
+        }
+    }
     val formByPage = remember(state.formFields) { state.formFields.groupBy { it.pageIndex } }
 
     var zoom by remember { mutableFloatStateOf(1f) }
@@ -230,6 +236,14 @@ fun ReaderScreen(
                                 onClick = {
                                     menuOpen = false
                                     showProtect = true
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(if (state.compressing) "Reducing size…" else "Reduce file size") },
+                                enabled = !state.compressing,
+                                onClick = {
+                                    menuOpen = false
+                                    viewModel.onEvent(ReaderEvent.Compress)
                                 },
                             )
                             DropdownMenuItem(
