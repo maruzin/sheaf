@@ -116,6 +116,7 @@ fun ReaderScreen(
     documentId: Long,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    onManagePages: (Long) -> Unit = {},
     viewModel: ReaderViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -208,6 +209,13 @@ fun ReaderScreen(
                                 )
                             }
                             HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("Manage pages") },
+                                onClick = {
+                                    menuOpen = false
+                                    state.documentId?.let { onManagePages(it) }
+                                },
+                            )
                             DropdownMenuItem(
                                 text = { Text("Print") },
                                 onClick = {

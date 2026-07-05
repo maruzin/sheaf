@@ -9,9 +9,13 @@ Running engineering log. Newest first. Every non-obvious decision gets one line 
   annotations overview sheet (jump/delete), and **signatures** (draw once → saved in DataStore →
   tap-to-stamp on any page; single-stroke v1). `Annotation` model uses page-normalized 0..1 coords
   (zoom-independent); Room `annotations` table (DB v2, destructive migration for dev).
-- **Remaining M3:** AcroForm form-fill (heaviest piece — needs PdfBox field parsing, on-page editable
-  overlays positioned to field rects, and writing values back to a saved PDF). Not started.
+- **AcroForm form-fill GREEN.** `PdfBoxFormReader` parses fields (PdfBox `fieldTree` → widget rects →
+  page-normalized `NormRect`), reader shows a Forms toggle + on-page editable overlay (text/choice inputs,
+  checkboxes), and Save fills values back via typed PdfBox calls (`PDTextField/PDChoice/PDCheckBox`) →
+  writes to cacheDir → shares via **FileProvider** (`${applicationId}.fileprovider`, `res/xml/file_paths.xml`).
+- **M3 COMPLETE:** ink, highlighter, notes, annotations overview, signatures, forms — all CI-green.
 - Signature stamping uses a fixed 0.4x0.16 normalized box (minor aspect distortion; acceptable for v1).
+- Form checkbox export values assume Yes/Off; typed calls are wrapped in runCatching so odd fields never crash.
 
 ## M2 — Design system + app shell (2026-07-04)
 
