@@ -1,9 +1,11 @@
 package com.sheaf.feature.reader.library
 
+import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -20,6 +22,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
@@ -32,13 +35,18 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import com.sheaf.core.domain.model.Document
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -74,12 +82,46 @@ fun LibraryScreen(
         }
     }
 
+    val scanner = remember {
+        GmsDocumentScanning.getClient(
+            GmsDocumentScannerOptions.Builder()
+                .setGalleryImportAllowed(true)
+                .setPageLimit(30)
+                .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_PDF)
+                .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
+                .build(),
+        )
+    }
+    val scanLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult(),
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val scan = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
+            scan?.pdf?.uri?.let { pdfUri ->
+                importScannedPdf(context, pdfUri)?.let { (uri, name, size) ->
+                    viewModel.onDocumentPicked(uri, name, size)
+                }
+            }
+        }
+    }
+    val startScan: () -> Unit = {
+        (context as? Activity)?.let { activity ->
+            scanner.getStartScanIntent(activity)
+                .addOnSuccessListener { sender ->
+                    scanLauncher.launch(IntentSenderRequest.Builder(sender).build())
+                }
+        }
+    }
+
     Scaffold(
         modifier = modifier,
         topBar = {
             TopAppBar(
                 title = { Text("Sheaf") },
                 actions = {
+                    IconButton(onClick = startScan) {
+                        Icon(Icons.Filled.DocumentScanner, contentDescription = "Scan document")
+                    }
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Filled.Settings, contentDescription = "Settings")
                     }
@@ -166,6 +208,17 @@ private fun DocumentRow(
         modifier = Modifier.clickable { onOpen(doc.id) },
     )
 }
+
+/** Copies a scanned PDF (temporary GMS uri) into app storage; returns (fileUri, name, sizeBytes). */
+private fun importScannedPdf(context: android.content.Context, pdfUri: Uri): Triple<String, String, Long>? =
+    runCatching {
+        val dir = File(context.filesDir, "scanned").apply { mkdirs() }
+        val outFile = File(dir, "scan_${System.currentTimeMillis()}.pdf")
+        context.contentResolver.openInputStream(pdfUri)?.use { input ->
+            outFile.outputStream().use { output -> input.copyTo(output) }
+        }
+        Triple(Uri.fromFile(outFile).toString(), "Scan ${outFile.name}", outFile.length())
+    }.getOrNull()
 
 private fun queryNameAndSize(context: android.content.Context, uri: Uri): Pair<String, Long> {
     var name = "Document"

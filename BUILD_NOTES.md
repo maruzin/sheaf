@@ -142,3 +142,14 @@ Running engineering log. Newest first. Every non-obvious decision gets one line 
 Push to GitHub so Actions CI runs the first real `assembleDebug` + tests (x86_64). Fix whatever it
 flags (likely version-matrix or first-sync nits). Then finish M1: add the text-capable engine for
 search/ToC/reflow, plus tabs/print/share, and an instrumented open→render smoke test.
+
+## M4 — Page management, security, compression (COMPLETE, CI-green)
+- **Manage pages** (`pages/{id}`): thumbnail grid, per-page rotate/delete/reorder (left/right), Save copy →
+  `PdfBoxPageEditor` imports pages into a fresh PDDocument (reorder+delete), applies rotation, writes to
+  filesDir → upserts a new library Document → opens it.
+- **Protect with password**: `PdfBoxSecurity.encrypt` (AES-128 StandardProtectionPolicy) → cacheDir → share.
+  `decrypt` engine also present (unlock-on-open UX deferred to the PDFium/androidx.pdf migration since
+  android.graphics PdfRenderer can't open password PDFs).
+- **Reduce file size**: `PdfBoxCompressor` downsamples embedded images (>1600px longest edge) and re-encodes
+  JPEG q=0.6 via `JPEGFactory`, replacing XObjects in page resources → share smaller copy.
+- All three share via the FileProvider added in M3.
