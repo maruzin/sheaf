@@ -5,6 +5,12 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.widget.Toast
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -36,8 +42,14 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -149,7 +161,7 @@ fun LibraryScreen(
             if (state.bookmarked.isNotEmpty()) {
                 item { SectionHeader("Bookmarked") }
                 items(state.bookmarked, key = { "b" + it.id }) { doc ->
-                    DocumentRow(doc, onOpen = onOpenDocument, onBookmark = viewModel::toggleBookmark)
+                    DocumentRow(doc, onOpen = onOpenDocument, onBookmark = viewModel::toggleBookmark, loadThumb = viewModel::thumbnail)
                 }
             }
             item { SectionHeader("Recent") }
@@ -157,7 +169,7 @@ fun LibraryScreen(
                 item { EmptyState() }
             } else {
                 items(state.recents, key = { "r" + it.id }) { doc ->
-                    DocumentRow(doc, onOpen = onOpenDocument, onBookmark = viewModel::toggleBookmark)
+                    DocumentRow(doc, onOpen = onOpenDocument, onBookmark = viewModel::toggleBookmark, loadThumb = viewModel::thumbnail)
                 }
             }
         }
@@ -195,8 +207,31 @@ private fun DocumentRow(
     doc: Document,
     onOpen: (Long) -> Unit,
     onBookmark: (Document) -> Unit,
+    loadThumb: suspend (String, Int) -> Bitmap?,
 ) {
+    var thumb by remember(doc.uri) { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(doc.uri) { thumb = loadThumb(doc.uri, 160) }
     ListItem(
+        leadingContent = {
+            val bmp = thumb
+            if (bmp != null) {
+                Image(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.size(width = 44.dp, height = 56.dp).clip(RoundedCornerShape(4.dp)),
+                )
+            } else {
+                Box(
+                    Modifier.size(width = 44.dp, height = 56.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.Description, contentDescription = null)
+                }
+            }
+        },
         headlineContent = {
             Text(doc.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis)
         },

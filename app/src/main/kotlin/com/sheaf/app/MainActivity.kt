@@ -1,5 +1,7 @@
 package com.sheaf.app
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -10,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,13 +29,28 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        setContent { SheafApp() }
+        val incoming = incomingPdfUri(intent)
+        setContent { SheafApp(incomingUri = incoming) }
+    }
+}
+
+/** Extracts a PDF uri from an "Open with" (VIEW) or share (SEND) intent, if present. */
+private fun incomingPdfUri(intent: Intent?): String? {
+    if (intent == null) return null
+    return when (intent.action) {
+        Intent.ACTION_VIEW -> intent.data?.toString()
+        Intent.ACTION_SEND -> {
+            @Suppress("DEPRECATION")
+            (intent.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri)?.toString()
+        }
+        else -> null
     }
 }
 
 @Composable
-private fun SheafApp(appViewModel: AppViewModel = hiltViewModel()) {
+private fun SheafApp(incomingUri: String? = null, appViewModel: AppViewModel = hiltViewModel()) {
     val state by appViewModel.state.collectAsStateWithLifecycle()
+    LaunchedEffect(incomingUri) { if (incomingUri != null) appViewModel.openIncoming(incomingUri) }
     SheafTheme(dynamicColor = state.dynamicColor) {
         if (state.loading) {
             Box(
@@ -48,6 +66,13 @@ private fun SheafApp(appViewModel: AppViewModel = hiltViewModel()) {
                 startDestination = if (state.onboardingDone) Routes.LIBRARY else Routes.ONBOARDING,
                 modifier = Modifier.fillMaxSize(),
             )
+            val pendingOpen by appViewModel.pendingOpenDoc.collectAsStateWithLifecycle()
+            LaunchedEffect(pendingOpen) {
+                pendingOpen?.let { id ->
+                    appViewModel.consumePendingOpen()
+                    navController.navigate(Routes.reader(id))
+                }
+            }
         }
     }
 }
