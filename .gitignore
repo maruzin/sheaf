@@ -36,3 +36,6 @@ sheaf-ai.properties
 keystore.properties
 *.jks
 *.keystore
+
+# Local-only Gradle daemon JVM pin (Android Studio writes this; keep it off CI)
+gradle/gradle-daemon-jvm.properties
