@@ -8,8 +8,10 @@ interface SettingsRepository {
     val defaultReaderTheme: Flow<String>
     val onboardingComplete: Flow<Boolean>
     val signature: Flow<String>
+    val isPro: Flow<Boolean>
     suspend fun setDynamicColor(enabled: Boolean)
     suspend fun setDefaultReaderTheme(theme: String)
     suspend fun setOnboardingComplete(complete: Boolean)
     suspend fun setSignature(encoded: String)
+    suspend fun setPro(value: Boolean)
 }

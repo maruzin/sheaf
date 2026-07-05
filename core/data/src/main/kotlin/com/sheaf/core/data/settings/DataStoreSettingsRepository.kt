@@ -26,6 +26,9 @@ class DataStoreSettingsRepository @Inject constructor(
     override val signature: Flow<String> =
         dataStore.data.map { it[KEY_SIGNATURE] ?: "" }
 
+    override val isPro: Flow<Boolean> =
+        dataStore.data.map { it[KEY_PRO] ?: false }
+
     override suspend fun setDynamicColor(enabled: Boolean) {
         dataStore.edit { it[KEY_DYNAMIC] = enabled }
     }
@@ -42,10 +45,15 @@ class DataStoreSettingsRepository @Inject constructor(
         dataStore.edit { it[KEY_SIGNATURE] = encoded }
     }
 
+    override suspend fun setPro(value: Boolean) {
+        dataStore.edit { it[KEY_PRO] = value }
+    }
+
     private companion object {
         val KEY_DYNAMIC = booleanPreferencesKey("dynamic_color")
         val KEY_READER_THEME = stringPreferencesKey("default_reader_theme")
         val KEY_ONBOARDING = booleanPreferencesKey("onboarding_complete")
         val KEY_SIGNATURE = stringPreferencesKey("signature")
+        val KEY_PRO = booleanPreferencesKey("is_pro")
     }
 }

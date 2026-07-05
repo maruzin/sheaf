@@ -1,5 +1,6 @@
 package com.sheaf.feature.reader
 
+import android.app.Activity
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.lifecycle.ViewModel
@@ -14,6 +15,7 @@ import com.sheaf.core.domain.repository.DocumentRepository
 import com.sheaf.core.domain.repository.SettingsRepository
 import com.sheaf.feature.reader.compress.PdfCompressor
 import com.sheaf.feature.reader.forms.PdfFormReader
+import com.sheaf.core.data.billing.BillingManager
 import com.sheaf.feature.reader.ocr.PdfOcr
 import com.sheaf.feature.reader.security.PdfSecurity
 import com.sheaf.feature.reader.render.PdfRenderSource
@@ -40,6 +42,7 @@ class ReaderViewModel @Inject constructor(
     private val security: PdfSecurity,
     private val compressor: PdfCompressor,
     private val ocr: PdfOcr,
+    private val billing: BillingManager,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ReaderUiState())
@@ -53,6 +56,9 @@ class ReaderViewModel @Inject constructor(
                 val pts = decodePoints(enc)
                 _state.update { it.copy(signaturePoints = pts, hasSignature = pts.isNotEmpty()) }
             }
+        }
+        viewModelScope.launch {
+            settings.isPro.collect { pro -> _state.update { it.copy(isPro = pro) } }
         }
     }
 
@@ -78,6 +84,8 @@ class ReaderViewModel @Inject constructor(
             ReaderEvent.ConsumeCompressed -> _state.update { it.copy(compressedPath = null) }
             ReaderEvent.Ocr -> runOcr()
             ReaderEvent.ConsumeOcr -> _state.update { it.copy(ocrDocumentId = null) }
+            ReaderEvent.ShowPaywall -> _state.update { it.copy(showPaywall = true) }
+            ReaderEvent.DismissPaywall -> _state.update { it.copy(showPaywall = false) }
             ReaderEvent.ToggleOutline -> _state.update { it.copy(outlineVisible = !it.outlineVisible) }
             ReaderEvent.ToggleAnnotationsList -> _state.update { it.copy(annotationsListVisible = !it.annotationsListVisible) }
             ReaderEvent.ToggleSearch -> _state.update {
@@ -178,9 +186,24 @@ class ReaderViewModel @Inject constructor(
         }
     }
 
+    /** Returns true and raises the paywall if the current user isn't Pro. */
+    private fun blockedByPaywall(): Boolean {
+        if (_state.value.isPro) return false
+        _state.update { it.copy(showPaywall = true) }
+        return true
+    }
+
+    fun upgrade(activity: Activity) {
+        viewModelScope.launch {
+            runCatching { billing.purchasePro(activity) }
+            _state.update { it.copy(showPaywall = false) }
+        }
+    }
+
     private fun protect(password: String) {
         val uri = _state.value.uri
         if (uri.isBlank() || password.isBlank()) return
+        if (blockedByPaywall()) return
         viewModelScope.launch {
             _state.update { it.copy(protecting = true) }
             val path = runCatching { security.encrypt(uri, password) }.getOrNull()
@@ -191,6 +214,7 @@ class ReaderViewModel @Inject constructor(
     private fun compress() {
         val uri = _state.value.uri
         if (uri.isBlank()) return
+        if (blockedByPaywall()) return
         viewModelScope.launch {
             _state.update { it.copy(compressing = true) }
             val path = runCatching { compressor.compress(uri) }.getOrNull()
@@ -201,6 +225,7 @@ class ReaderViewModel @Inject constructor(
     private fun runOcr() {
         val s = _state.value
         if (s.uri.isBlank() || s.ocrRunning) return
+        if (blockedByPaywall()) return
         viewModelScope.launch {
             _state.update { it.copy(ocrRunning = true) }
             val path = runCatching { ocr.makeSearchable(s.uri) }.getOrNull()

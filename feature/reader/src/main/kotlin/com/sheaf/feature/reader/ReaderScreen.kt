@@ -1,5 +1,6 @@
 package com.sheaf.feature.reader
 
+import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.Canvas
@@ -239,26 +240,39 @@ fun ReaderScreen(
                                 },
                             )
                             DropdownMenuItem(
-                                text = { Text("Protect with password") },
+                                text = { Text(proLabel("Protect with password", state.isPro)) },
                                 onClick = {
                                     menuOpen = false
-                                    showProtect = true
+                                    if (state.isPro) showProtect = true
+                                    else viewModel.onEvent(ReaderEvent.ShowPaywall)
                                 },
                             )
                             DropdownMenuItem(
-                                text = { Text(if (state.compressing) "Reducing size…" else "Reduce file size") },
+                                text = {
+                                    Text(
+                                        if (state.compressing) "Reducing size…"
+                                        else proLabel("Reduce file size", state.isPro),
+                                    )
+                                },
                                 enabled = !state.compressing,
                                 onClick = {
                                     menuOpen = false
-                                    viewModel.onEvent(ReaderEvent.Compress)
+                                    if (state.isPro) viewModel.onEvent(ReaderEvent.Compress)
+                                    else viewModel.onEvent(ReaderEvent.ShowPaywall)
                                 },
                             )
                             DropdownMenuItem(
-                                text = { Text(if (state.ocrRunning) "Recognizing text…" else "Make searchable (OCR)") },
+                                text = {
+                                    Text(
+                                        if (state.ocrRunning) "Recognizing text…"
+                                        else proLabel("Make searchable (OCR)", state.isPro),
+                                    )
+                                },
                                 enabled = !state.ocrRunning,
                                 onClick = {
                                     menuOpen = false
-                                    viewModel.onEvent(ReaderEvent.Ocr)
+                                    if (state.isPro) viewModel.onEvent(ReaderEvent.Ocr)
+                                    else viewModel.onEvent(ReaderEvent.ShowPaywall)
                                 },
                             )
                             DropdownMenuItem(
@@ -415,6 +429,13 @@ fun ReaderScreen(
         }
     }
 
+    if (state.showPaywall) {
+        PaywallDialog(
+            onDismiss = { viewModel.onEvent(ReaderEvent.DismissPaywall) },
+            onUpgrade = { (context as? Activity)?.let { viewModel.upgrade(it) } },
+        )
+    }
+
     if (showProtect) {
         PasswordDialog(
             busy = state.protecting,
@@ -482,6 +503,27 @@ private fun SignatureCaptureDialog(onDismiss: () -> Unit, onSave: (List<NormPoin
         },
         confirmButton = { TextButton(onClick = { onSave(pts.toList()) }) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+private fun proLabel(text: String, isPro: Boolean): String = if (isPro) text else "$text  ·  PRO"
+
+@Composable
+private fun PaywallDialog(onDismiss: () -> Unit, onUpgrade: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Sheaf Pro") },
+        text = {
+            androidx.compose.foundation.layout.Column {
+                Text("Unlock the advanced toolkit:")
+                Spacer(Modifier.height(8.dp))
+                Text("•  OCR — make scans searchable")
+                Text("•  Reduce file size")
+                Text("•  Password protection")
+            }
+        },
+        confirmButton = { TextButton(onClick = onUpgrade) { Text("Upgrade") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Not now") } },
     )
 }
 

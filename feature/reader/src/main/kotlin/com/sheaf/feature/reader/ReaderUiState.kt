@@ -50,6 +50,9 @@ data class ReaderUiState(
     // OCR (make searchable)
     val ocrRunning: Boolean = false,
     val ocrDocumentId: Long? = null,
+    // Freemium
+    val isPro: Boolean = false,
+    val showPaywall: Boolean = false,
     // One-shot page the UI should scroll to (consumed via ConsumeScroll)
     val pendingScrollPage: Int? = null,
     val error: String? = null,
@@ -83,6 +86,8 @@ sealed interface ReaderEvent {
     data object ConsumeCompressed : ReaderEvent
     data object Ocr : ReaderEvent
     data object ConsumeOcr : ReaderEvent
+    data object ShowPaywall : ReaderEvent
+    data object DismissPaywall : ReaderEvent
     data object ConsumeScroll : ReaderEvent
     data class JumpTo(val page: Int) : ReaderEvent
 }
