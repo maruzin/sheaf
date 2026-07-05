@@ -1,6 +1,7 @@
 package com.sheaf.feature.reader
 
 import com.sheaf.core.domain.model.Annotation
+import com.sheaf.core.domain.model.FormField
 import com.sheaf.core.domain.model.OutlineEntry
 import com.sheaf.core.domain.model.NormPoint
 import com.sheaf.core.domain.model.SearchHit
@@ -34,6 +35,12 @@ data class ReaderUiState(
     val signaturePoints: List<NormPoint> = emptyList(),
     val annotationsListVisible: Boolean = false,
     val annotationsByPage: Map<Int, List<Annotation>> = emptyMap(),
+    // Forms (AcroForm fill)
+    val formFields: List<FormField> = emptyList(),
+    val formMode: Boolean = false,
+    val formValues: Map<String, String> = emptyMap(),
+    val savingForm: Boolean = false,
+    val filledUri: String? = null,
     // One-shot page the UI should scroll to (consumed via ConsumeScroll)
     val pendingScrollPage: Int? = null,
     val error: String? = null,
@@ -57,6 +64,10 @@ sealed interface ReaderEvent {
     data class SetHighlighter(val on: Boolean) : ReaderEvent
     data class SetNoteMode(val on: Boolean) : ReaderEvent
     data class SetSignatureMode(val on: Boolean) : ReaderEvent
+    data object ToggleFormMode : ReaderEvent
+    data class SetFormValue(val name: String, val value: String) : ReaderEvent
+    data object SaveForm : ReaderEvent
+    data object ConsumeFilled : ReaderEvent
     data object ConsumeScroll : ReaderEvent
     data class JumpTo(val page: Int) : ReaderEvent
 }

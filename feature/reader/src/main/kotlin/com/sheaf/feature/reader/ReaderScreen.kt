@@ -86,10 +86,22 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.filled.Assignment
+import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import com.sheaf.core.domain.model.Annotation
 import com.sheaf.core.domain.model.AnnotationType
+import com.sheaf.core.domain.model.FormField
+import com.sheaf.core.domain.model.FormFieldType
 import com.sheaf.core.domain.model.NormPoint
 import com.sheaf.feature.reader.print.printPdf
+import java.io.File
 import kotlin.math.roundToInt
 
 private val InkColors = listOf(
@@ -122,6 +134,13 @@ fun ReaderScreen(
             viewModel.onEvent(ReaderEvent.ConsumeScroll)
         }
     }
+    LaunchedEffect(state.filledUri) {
+        state.filledUri?.let { path ->
+            shareFilledPdf(context, path, state.displayName)
+            viewModel.onEvent(ReaderEvent.ConsumeFilled)
+        }
+    }
+    val formByPage = remember(state.formFields) { state.formFields.groupBy { it.pageIndex } }
 
     var zoom by remember { mutableFloatStateOf(1f) }
     var menuOpen by remember { mutableStateOf(false) }
@@ -144,6 +163,16 @@ fun ReaderScreen(
                         if (state.annotationsByPage.isNotEmpty()) {
                             IconButton(onClick = { viewModel.onEvent(ReaderEvent.ToggleAnnotationsList) }) {
                                 Icon(Icons.Filled.EditNote, contentDescription = "Annotations")
+                            }
+                        }
+                        if (state.formFields.isNotEmpty()) {
+                            IconButton(onClick = { viewModel.onEvent(ReaderEvent.ToggleFormMode) }) {
+                                Icon(
+                                    Icons.Filled.Assignment,
+                                    contentDescription = "Fill form",
+                                    tint = if (state.formMode) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurface,
+                                )
                             }
                         }
                         IconButton(onClick = { viewModel.onEvent(ReaderEvent.ToggleAnnotate) }) {
@@ -217,6 +246,13 @@ fun ReaderScreen(
                         onClearPage = { viewModel.clearPageAnnotations(state.currentPage) },
                     )
                 }
+                if (state.formMode) {
+                    FormBar(
+                        fieldCount = state.formFields.size,
+                        saving = state.savingForm,
+                        onSave = { viewModel.onEvent(ReaderEvent.SaveForm) },
+                    )
+                }
             }
         },
     ) { padding ->
@@ -243,6 +279,10 @@ fun ReaderScreen(
                     onEditNote = { ann -> editingNote = ann },
                     signatureMode = state.signatureMode,
                     onStampSignature = { page, pt -> viewModel.stampSignature(page, pt) },
+                    formMode = state.formMode,
+                    formFieldsByPage = formByPage,
+                    formValues = state.formValues,
+                    onFormValue = { name, value -> viewModel.onEvent(ReaderEvent.SetFormValue(name, value)) },
                     aspectRatioOf = viewModel::aspectRatio,
                     renderPage = { i, w, h -> viewModel.renderPage(i, w, h) },
                     listState = listState,
@@ -549,6 +589,10 @@ private fun PageList(
     onEditNote: (Annotation) -> Unit,
     signatureMode: Boolean,
     onStampSignature: (Int, NormPoint) -> Unit,
+    formMode: Boolean,
+    formFieldsByPage: Map<Int, List<FormField>>,
+    formValues: Map<String, String>,
+    onFormValue: (String, String) -> Unit,
     aspectRatioOf: (Int) -> Float,
     renderPage: suspend (Int, Int, Int) -> android.graphics.Bitmap?,
     listState: LazyListState,
@@ -578,6 +622,10 @@ private fun PageList(
                 onEditNote = onEditNote,
                 signatureMode = signatureMode,
                 onStampSignature = { pt -> onStampSignature(index, pt) },
+                formMode = formMode,
+                formFields = formFieldsByPage[index].orEmpty(),
+                formValues = formValues,
+                onFormValue = onFormValue,
                 renderPage = renderPage,
             )
         }
@@ -599,6 +647,10 @@ private fun PdfPageItem(
     onEditNote: (Annotation) -> Unit,
     signatureMode: Boolean,
     onStampSignature: (NormPoint) -> Unit,
+    formMode: Boolean,
+    formFields: List<FormField>,
+    formValues: Map<String, String>,
+    onFormValue: (String, String) -> Unit,
     renderPage: suspend (Int, Int, Int) -> android.graphics.Bitmap?,
 ) {
     val density = LocalDensity.current
@@ -698,6 +750,84 @@ private fun PdfPageItem(
                 }
             }
         }
+        if (formMode && formFields.isNotEmpty()) {
+            FormFieldOverlay(fields = formFields, values = formValues, onValue = onFormValue)
+        }
+    }
+}
+
+@Composable
+private fun FormFieldOverlay(
+    fields: List<FormField>,
+    values: Map<String, String>,
+    onValue: (String, String) -> Unit,
+) {
+    BoxWithConstraints(Modifier.matchParentSize()) {
+        val w = maxWidth
+        val h = maxHeight
+        fields.forEach { f ->
+            val x = w * f.rect.x.coerceIn(0f, 1f)
+            val y = h * f.rect.y.coerceIn(0f, 1f)
+            val fw = (w * f.rect.w.coerceIn(0f, 1f)).coerceAtLeast(24.dp)
+            val fh = (h * f.rect.h.coerceIn(0f, 1f)).coerceAtLeast(16.dp)
+            val current = values[f.name] ?: f.value
+            when (f.type) {
+                FormFieldType.Checkbox -> {
+                    val checked = current.isNotBlank() && !current.equals("Off", ignoreCase = true)
+                    Checkbox(
+                        checked = checked,
+                        onCheckedChange = { onValue(f.name, if (it) "Yes" else "Off") },
+                        modifier = Modifier.offset(x = x, y = y),
+                    )
+                }
+                FormFieldType.Unsupported -> Unit
+                else -> {
+                    BasicTextField(
+                        value = current,
+                        onValueChange = { onValue(f.name, it) },
+                        singleLine = true,
+                        textStyle = TextStyle(fontSize = 12.sp, color = Color(0xFF15171C)),
+                        modifier = Modifier
+                            .offset(x = x, y = y)
+                            .size(width = fw, height = fh)
+                            .background(Color(0x223457D5))
+                            .border(1.dp, Color(0xFF3457D5))
+                            .padding(horizontal = 2.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FormBar(fieldCount: Int, saving: Boolean, onSave: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = "$fieldCount form field${if (fieldCount == 1) "" else "s"}",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.weight(1f))
+        if (saving) CircularProgressIndicator(Modifier.size(20.dp))
+        Button(onClick = onSave, enabled = !saving) { Text("Save filled PDF") }
+    }
+}
+
+private fun shareFilledPdf(context: android.content.Context, path: String, displayName: String) {
+    runCatching {
+        val file = File(path)
+        val uri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "application/pdf"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_TITLE, displayName)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(send, "Share filled PDF"))
     }
 }
 

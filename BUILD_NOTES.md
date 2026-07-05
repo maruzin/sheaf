@@ -5,8 +5,13 @@ Running engineering log. Newest first. Every non-obvious decision gets one line 
 ---
 
 ## M3 — Annotations (in progress, 2026-07-04)
-- **Ink drawing GREEN on CI.** `Annotation` model (page-normalized 0..1 coords, zoom-independent), Room `annotations` table (DB v2, destructive migration for dev), `AnnotationRepository`. Reader: Draw toggle + colour palette + clear-page; strokes persist and redraw. Pinch-zoom suspended while annotating.
-- Next: highlight (translucent wide stroke), sticky notes (tap-to-place + edit), signatures (draw/save/reuse), AcroForm form fill.
+- **GREEN on CI:** ink drawing, highlighter, sticky notes (tap-to-place + edit + on-page markers),
+  annotations overview sheet (jump/delete), and **signatures** (draw once → saved in DataStore →
+  tap-to-stamp on any page; single-stroke v1). `Annotation` model uses page-normalized 0..1 coords
+  (zoom-independent); Room `annotations` table (DB v2, destructive migration for dev).
+- **Remaining M3:** AcroForm form-fill (heaviest piece — needs PdfBox field parsing, on-page editable
+  overlays positioned to field rects, and writing values back to a saved PDF). Not started.
+- Signature stamping uses a fixed 0.4x0.16 normalized box (minor aspect distortion; acceptable for v1).
 
 ## M2 — Design system + app shell (2026-07-04)
 

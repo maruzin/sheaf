@@ -10,6 +10,7 @@ import com.sheaf.core.domain.model.ReadingPosition
 import com.sheaf.core.domain.repository.AnnotationRepository
 import com.sheaf.core.domain.repository.DocumentRepository
 import com.sheaf.core.domain.repository.SettingsRepository
+import com.sheaf.feature.reader.forms.PdfFormReader
 import com.sheaf.feature.reader.render.PdfRenderSource
 import com.sheaf.feature.reader.render.PdfRenderSourceFactory
 import com.sheaf.feature.reader.search.PdfOutlineExtractor
@@ -30,6 +31,7 @@ class ReaderViewModel @Inject constructor(
     private val outlineExtractor: PdfOutlineExtractor,
     private val annotationRepo: AnnotationRepository,
     private val settings: SettingsRepository,
+    private val formReader: PdfFormReader,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ReaderUiState())
@@ -57,6 +59,11 @@ class ReaderViewModel @Inject constructor(
             is ReaderEvent.SetHighlighter -> _state.update { it.copy(highlighter = event.on, noteMode = false, signatureMode = false) }
             is ReaderEvent.SetNoteMode -> _state.update { it.copy(noteMode = event.on, signatureMode = false) }
             is ReaderEvent.SetSignatureMode -> _state.update { it.copy(signatureMode = event.on, noteMode = false) }
+            ReaderEvent.ToggleFormMode -> _state.update { it.copy(formMode = !it.formMode) }
+            is ReaderEvent.SetFormValue ->
+                _state.update { it.copy(formValues = it.formValues + (event.name to event.value)) }
+            ReaderEvent.SaveForm -> saveForm()
+            ReaderEvent.ConsumeFilled -> _state.update { it.copy(filledUri = null) }
             ReaderEvent.ToggleOutline -> _state.update { it.copy(outlineVisible = !it.outlineVisible) }
             ReaderEvent.ToggleAnnotationsList -> _state.update { it.copy(annotationsListVisible = !it.annotationsListVisible) }
             ReaderEvent.ToggleSearch -> _state.update {
@@ -93,6 +100,7 @@ class ReaderViewModel @Inject constructor(
                 }
                 loadOutline(doc.uri)
                 observeAnnotations(documentId)
+                loadForms(doc.uri)
             }.onFailure { t ->
                 _state.update {
                     it.copy(isLoading = false, error = t.message ?: "Failed to open document")
@@ -135,6 +143,24 @@ class ReaderViewModel @Inject constructor(
         viewModelScope.launch {
             val toc = runCatching { outlineExtractor.outline(uri) }.getOrDefault(emptyList())
             if (toc.isNotEmpty()) _state.update { it.copy(outline = toc) }
+        }
+    }
+
+    private fun loadForms(uri: String) {
+        viewModelScope.launch {
+            val fields = runCatching { formReader.readFields(uri) }.getOrDefault(emptyList())
+            val initial = fields.associate { it.name to it.value }
+            _state.update { it.copy(formFields = fields, formValues = initial) }
+        }
+    }
+
+    private fun saveForm() {
+        val uri = _state.value.uri
+        if (uri.isBlank() || _state.value.formFields.isEmpty()) return
+        viewModelScope.launch {
+            _state.update { it.copy(savingForm = true) }
+            val out = runCatching { formReader.fillAndSave(uri, _state.value.formValues) }.getOrNull()
+            _state.update { it.copy(savingForm = false, filledUri = out) }
         }
     }
 
