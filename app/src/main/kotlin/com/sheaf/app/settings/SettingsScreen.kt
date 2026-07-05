@@ -1,5 +1,7 @@
 package com.sheaf.app.settings
 
+import android.app.Activity
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,11 +20,13 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -49,6 +53,34 @@ fun SettingsScreen(
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
+            val context = LocalContext.current
+            ListItem(
+                headlineContent = { Text(if (state.isPro) "Sheaf Pro — active" else "Sheaf Pro") },
+                supportingContent = {
+                    Text(
+                        if (state.isPro) "Thanks for supporting Sheaf. All advanced tools are unlocked."
+                        else "Unlock OCR, file compression, and password protection.",
+                    )
+                },
+                trailingContent = {
+                    if (state.isPro) {
+                        TextButton(onClick = { viewModel.restore() }) { Text("Restore") }
+                    } else {
+                        TextButton(onClick = { (context as? Activity)?.let { viewModel.upgrade(it) } }) {
+                            Text("Upgrade")
+                        }
+                    }
+                },
+            )
+            if (!state.isPro) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(onClick = { viewModel.restore() }) { Text("Restore purchase") }
+                }
+            }
+            HorizontalDivider()
             ListItem(
                 headlineContent = { Text("Material You colors") },
                 supportingContent = { Text("Use your wallpaper palette instead of Ember") },
