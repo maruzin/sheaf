@@ -40,6 +40,8 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            // Bundle native debug symbols so Play can symbolicate native crashes/ANRs.
+            ndk { debugSymbolLevel = "FULL" }
             // Uses the release keystore when keystore.properties is present.
             if (keystorePropertiesFile.exists()) {
                 signingConfig = signingConfigs.getByName("release")
