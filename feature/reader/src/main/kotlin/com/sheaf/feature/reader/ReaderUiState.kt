@@ -53,6 +53,7 @@ data class ReaderUiState(
     // Freemium
     val isPro: Boolean = false,
     val showPaywall: Boolean = false,
+    val billingMessage: String? = null,
     // Encrypted-document open flow
     val needsPassword: Boolean = false,
     val passwordError: String? = null,
@@ -91,6 +92,7 @@ sealed interface ReaderEvent {
     data object ConsumeOcr : ReaderEvent
     data object ShowPaywall : ReaderEvent
     data object DismissPaywall : ReaderEvent
+    data object ConsumeBillingMessage : ReaderEvent
     data class SubmitOpenPassword(val password: String) : ReaderEvent
     data object CancelOpenPassword : ReaderEvent
     data object ConsumeScroll : ReaderEvent

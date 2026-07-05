@@ -3,6 +3,7 @@ package com.sheaf.feature.reader
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -161,6 +162,12 @@ fun ReaderScreen(
         state.ocrDocumentId?.let { id ->
             viewModel.onEvent(ReaderEvent.ConsumeOcr)
             onOpenDocument(id)
+        }
+    }
+    LaunchedEffect(state.billingMessage) {
+        state.billingMessage?.let { msg ->
+            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+            viewModel.onEvent(ReaderEvent.ConsumeBillingMessage)
         }
     }
     val formByPage = remember(state.formFields) { state.formFields.groupBy { it.pageIndex } }

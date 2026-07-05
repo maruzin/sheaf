@@ -58,7 +58,9 @@ class ReaderViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
-            settings.isPro.collect { pro -> _state.update { it.copy(isPro = pro) } }
+            settings.isPro.collect { pro ->
+                _state.update { it.copy(isPro = pro, showPaywall = if (pro) false else it.showPaywall) }
+            }
         }
     }
 
@@ -86,6 +88,7 @@ class ReaderViewModel @Inject constructor(
             ReaderEvent.ConsumeOcr -> _state.update { it.copy(ocrDocumentId = null) }
             ReaderEvent.ShowPaywall -> _state.update { it.copy(showPaywall = true) }
             ReaderEvent.DismissPaywall -> _state.update { it.copy(showPaywall = false) }
+            ReaderEvent.ConsumeBillingMessage -> _state.update { it.copy(billingMessage = null) }
             is ReaderEvent.SubmitOpenPassword -> submitOpenPassword(event.password)
             ReaderEvent.CancelOpenPassword ->
                 _state.update { it.copy(needsPassword = false, error = "Couldn't open this document") }
@@ -119,6 +122,7 @@ class ReaderViewModel @Inject constructor(
                 _state.update { it.copy(isLoading = false, error = "Couldn't open this document") }
                 return@launch
             }
+            source?.close() // release the previous renderer + file descriptor before replacing it
             source = opened
             val restored = repository.readingPosition(documentId)
             _state.update {
@@ -209,8 +213,10 @@ class ReaderViewModel @Inject constructor(
 
     fun upgrade(activity: Activity) {
         viewModelScope.launch {
-            runCatching { billing.purchasePro(activity) }
-            _state.update { it.copy(showPaywall = false) }
+            // purchasePro returns null when the Play purchase flow launches OK, else a short error.
+            val error = runCatching { billing.purchasePro(activity) }.getOrElse { "Couldn't start the purchase" }
+            _state.update { it.copy(billingMessage = error) }
+            // On success the Play sheet takes over; the isPro collector closes the paywall when it completes.
         }
     }
 
