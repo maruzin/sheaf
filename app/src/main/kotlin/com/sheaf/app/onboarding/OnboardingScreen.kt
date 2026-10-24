@@ -8,16 +8,18 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.background
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -32,29 +34,34 @@ fun OnboardingScreen(
     modifier: Modifier = Modifier,
     viewModel: OnboardingViewModel = hiltViewModel(),
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(horizontal = 28.dp, vertical = 40.dp),
-    ) {
-        Spacer(Modifier.height(24.dp))
-        Text("Welcome to Sheaf", style = MaterialTheme.typography.displaySmall)
-        Text(
-            "Your all-in-one PDF workspace.",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 8.dp),
-        )
-        Spacer(Modifier.height(36.dp))
-        Feature(Icons.Filled.Description, "Read", "Fast viewer with search, outline, and reading themes.")
-        Feature(Icons.Filled.CameraAlt, "Scan", "Turn paper into clean, searchable PDFs.")
-        Feature(Icons.Filled.AutoAwesome, "Ask", "Chat with your document — grounded in its pages.")
-        Spacer(Modifier.weight(1f))
-        Button(
-            onClick = { viewModel.complete(onDone) },
-            modifier = Modifier.fillMaxWidth(),
+    // Surface supplies the background and on-background content color (light + dark themes).
+    Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                // Android 16 (targetSdk 36) always draws edge-to-edge: keep content clear of system bars.
+                .safeDrawingPadding()
+                .padding(horizontal = 28.dp, vertical = 24.dp),
         ) {
-            Text("Get started")
+            Spacer(Modifier.height(24.dp))
+            Text("Welcome to Sheaf", style = MaterialTheme.typography.displaySmall)
+            Text(
+                "Your all-in-one PDF workspace.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            Spacer(Modifier.height(36.dp))
+            Feature(Icons.Filled.Description, "Read", "Fast viewer with search, outline, and reading themes.")
+            Feature(Icons.Filled.CameraAlt, "Scan", "Turn paper into clean, searchable PDFs.")
+            Feature(Icons.Filled.Draw, "Annotate & sign", "Highlight, add notes, fill forms, and sign.")
+            Spacer(Modifier.weight(1f))
+            Button(
+                onClick = { viewModel.complete(onDone) },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Get started")
+            }
         }
     }
 }

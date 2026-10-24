@@ -49,6 +49,8 @@ class BillingManager @Inject constructor(
         .enablePendingPurchases(
             PendingPurchasesParams.newBuilder().enableOneTimeProducts().build(),
         )
+        // Billing Library 8+: re-establish the Play connection automatically after a disconnect.
+        .enableAutoServiceReconnection()
         .build()
 
     /** Call once at app launch to restore an existing entitlement. */
@@ -85,7 +87,14 @@ class BillingManager @Inject constructor(
             .setProductType(BillingClient.ProductType.INAPP)
             .build()
         val result = runCatching { client.queryPurchasesAsync(params) }.getOrNull() ?: return
+        // Only trust a successful answer from Play; on errors keep the cached entitlement.
+        if (result.billingResult.responseCode != BillingClient.BillingResponseCode.OK) return
+        val owned = result.purchasesList.any {
+            it.products.contains(PRO_ID) && it.purchaseState == Purchase.PurchaseState.PURCHASED
+        }
         result.purchasesList.forEach { handlePurchase(it) }
+        // Play no longer reports the purchase (refunded or revoked): remove Pro.
+        if (!owned) settings.setPro(false)
     }
 
     private suspend fun handlePurchase(purchase: Purchase) {

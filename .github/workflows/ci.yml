@@ -34,6 +34,10 @@ jobs:
       - name: Lint
         run: ./gradlew lintDebug --stacktrace
 
+      # Release build with R8 shrinking — catches keep-rule / minify breakage before a Play upload.
+      - name: Release bundle (unsigned)
+        run: ./gradlew bundleRelease --stacktrace
+
       - name: Upload reports
         if: always()
         uses: actions/upload-artifact@v4

@@ -22,13 +22,22 @@ Monetization ▸ Products ▸ **In-app products** ▸ Create:
 - No location, contacts, storage-broad, or background permissions.
 
 ## Data safety form (answers)
-- **Does your app collect or share user data?** → **No.**
-  Sheaf processes documents on-device, has no accounts/analytics/ads, and runs OCR/scanning on-device.
-  Purchases go through Google Play Billing (Google handles payment data; Sheaf stores only a local
-  "Pro unlocked" flag).
-- **Is all data encrypted in transit?** → Not applicable (Sheaf sends no user data). The only network use
-  is Google Play, which is encrypted by Google.
-- **Data deletion:** No account/server data to delete.
+Sheaf itself sends nothing, but the bundled **Google ML Kit** SDK (OCR + document scanner) sends
+diagnostics to Google, and Play requires you to declare SDK collection
+(https://developers.google.com/ml-kit/android-data-disclosure). Answering "No data collected" is a
+common cause of Data safety rejections. Declare:
+- **Does your app collect or share any of the required user data types?** → **Yes.**
+- **Is all of the user data collected by your app encrypted in transit?** → **Yes** (ML Kit uses HTTPS).
+- **Do you provide a way for users to request that their data is deleted?** → **No** (no account and no
+  developer-held data; ML Kit diagnostics are held by Google).
+- **Data types → Collected (not shared), processed ephemerally: No, collection required: Yes,
+  purpose: App functionality + Analytics (diagnostics):**
+  - **App info and performance → Crash logs / Diagnostics** (ML Kit performance and error metrics).
+  - **Device or other IDs** (ML Kit per-installation identifier).
+- **Not collected:** personal info, financial info (Google Play Billing handles payment — Google is the
+  data controller there, so you don't declare it), location, files and docs (processed on-device only),
+  photos (scanner images stay on-device), messages, contacts, web history.
+- Keep this in sync with `docs/PRIVACY_POLICY.md` / `privacy-policy.html` (both say the same).
 
 ## Content rating
 Complete the questionnaire honestly — Sheaf is a utility with no user-generated public content, no
@@ -58,5 +67,12 @@ policy. Easiest free option: enable **GitHub Pages** on the repo and use
 ## Common first-submission blockers (avoid these)
 - Product ID mismatch (must be exactly `sheaf_pro`).
 - Missing privacy policy URL.
-- targetSdk too low — Sheaf targets **35**, which meets the current requirement. ✔
+- targetSdk too low — since 31 Aug 2026 new apps and updates must target **API 36 (Android 16)**.
+  Sheaf targets **36**. ✔
+- Play Billing Library too old — since 31 Aug 2026, **v8 or later** is required. Sheaf uses **8.3.0**. ✔
+- 16 KB memory pages — required for apps targeting Android 15+. All bundled native libs (ML Kit OCR,
+  DataStore, Compose graphics) are 16 KB-aligned (checked with `zipalign -c -P 16`). ✔
+- versionCode must go up on every upload (currently **3**, in `AndroidApplicationConventionPlugin.kt`).
+- Data safety says "no data" while ML Kit sends diagnostics — see the answers above.
+- Store listing / onboarding mentioning features that aren't shipped (e.g. AI chat) → misleading claims.
 - Testing the purchase on a non-license-tester account (it will attempt a real charge).

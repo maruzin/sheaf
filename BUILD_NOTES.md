@@ -4,6 +4,32 @@ Running engineering log. Newest first. Every non-obvious decision gets one line 
 
 ---
 
+## Play compliance pass (2026-10-24) — v1.0.1 (versionCode 3)
+Checked against Play's live requirements and verified with real local builds (assembleDebug,
+bundleRelease with R8, unit tests, lintRelease; JDK 21, Android SDK 36).
+- **targetSdk/compileSdk 35 → 36.** Play requires API 36 for new apps and updates since 31 Aug 2026.
+  Needed **AGP 8.7.3 → 8.13.2** and **Gradle wrapper 8.11.1 → 8.14.3**. Stayed on AGP 8.x and Kotlin 2.1.0
+  on purpose: AGP 9 / Kotlin 2.3+ is a big migration and not needed to publish.
+- **Play Billing 7.1.1 → 8.3.0.** v7 was blocked for new uploads from 31 Aug 2026. Added
+  `enableAutoServiceReconnection()`. **Fixed:** `restore()` now removes Pro when Play reports no owned
+  `sheaf_pro` (refund/revoke). Before, Pro could only ever be switched on. It only clears on a
+  successful (OK) Play response, so being offline never removes Pro.
+- **Edge-to-edge (forced at API 36):** all screens except onboarding already used Scaffold insets.
+  Onboarding now uses `safeDrawingPadding()` inside a `Surface`. The Surface also fixes black text in
+  dark theme.
+- **Misleading claims:** onboarding advertised "Ask — chat with your document", but `:feature:ai` is a
+  stub. Replaced it with "Annotate & sign". Re-add only when AI ships.
+- **16 KB pages:** every bundled `.so` (ML Kit OCR, DataStore, Compose graphics path) has 16 KB LOAD
+  alignment and passes `zipalign -c -P 16`.
+- **Lint TrustAllX509TrustManager** is from BouncyCastle (via PdfBox). R8 strips all BouncyCastle
+  classes from the release dex (verified), so it doesn't ship.
+- **Data safety:** ML Kit sends diagnostics, device/app info and an install ID to Google. The guide's old
+  "No data collected" answer was wrong. Fixed the guide, privacy policy (md + html) and listing copy.
+- ML Kit document scanner `16.0.0-beta1 → 16.0.0` (stable). CI now also runs `bundleRelease` (R8).
+- **Not verified here (no emulator/KVM):** behaviour on a device. Before production, run an internal-
+  testing build on a real Android 16 phone: open/scan/OCR/forms/sign, purchase + restore with a license
+  tester, and dark theme on the onboarding screen.
+
 ## M3 — Annotations (in progress, 2026-07-04)
 - **GREEN on CI:** ink drawing, highlighter, sticky notes (tap-to-place + edit + on-page markers),
   annotations overview sheet (jump/delete), and **signatures** (draw once → saved in DataStore →

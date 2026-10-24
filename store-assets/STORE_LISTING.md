@@ -7,8 +7,8 @@ Sheaf
 Read, annotate, scan & sign PDFs. Fast, private, and fully on-device.
 
 ## Full description (4000 char max)
-Sheaf is a fast, private PDF toolkit for Android. Everything happens on your device —
-no accounts, no ads, no tracking, and your documents never leave your phone.
+Sheaf is a fast, private PDF toolkit for Android. Your documents are processed on your
+device — no accounts, no ads, and your files never leave your phone.
 
 READ
 • Smooth page rendering with pinch-to-zoom
@@ -41,8 +41,8 @@ SHEAF PRO — a one-time purchase, no subscription
 • Password-protect a PDF with AES encryption
 
 PRIVACY FIRST
-Sheaf processes your files locally. Scanning and OCR run on-device using Google ML Kit,
-and the only network access is for Google Play (purchases). We don't collect your data.
+Sheaf processes your files locally. Scanning and OCR run on-device using Google ML Kit —
+your documents never leave your phone. No accounts, no ads, no analytics.
 
 Made for people who just want their PDFs to work — quickly, cleanly, and privately.
 
@@ -55,4 +55,7 @@ pdf reader, pdf editor, annotate pdf, sign pdf, scan to pdf, ocr, pdf tools, doc
 ## Notes
 - Screenshots in this folder are polished mockups of the real UI (Ember theme). Replace with real
   device captures after you run the app for QA — Play prefers actual screenshots.
+- Play policy: screenshots must show the real app. Before production, replace these mockups with
+  real captures from a phone (and 7"/10" tablet if you list tablet support).
+- Never advertise AI / chat features here until they ship in the app (misleading-claims policy).
 - Required assets included here: icon-512.png, feature-graphic-1024x500.png, four phone screenshots.
