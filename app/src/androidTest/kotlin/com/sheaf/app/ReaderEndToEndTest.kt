@@ -67,7 +67,11 @@ class ReaderEndToEndTest {
         } catch (e: androidx.compose.ui.test.ComposeTimeoutException) {
             // Put what is actually on screen into the failure so CI logs show the real state.
             throw AssertionError(
-                "Timed out waiting for text '$text'. Screen:\n" + compose.onRoot().printToString(maxDepth = 30),
+                // One line: Gradle's console shows only the first lines of a failure message.
+                "Timed out waiting for text '$text'. Screen: " +
+                    runCatching { compose.onRoot(useUnmergedTree = true).printToString(maxDepth = 30) }
+                        .getOrElse { "<no compose root: ${it.message}>" }
+                        .replace("\n", " | "),
                 e,
             )
         }
