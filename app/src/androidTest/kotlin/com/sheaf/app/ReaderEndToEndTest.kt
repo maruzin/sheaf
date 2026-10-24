@@ -14,6 +14,8 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.printToString
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -59,8 +61,17 @@ class ReaderEndToEndTest {
     private fun waitForDescription(description: String) =
         compose.waitUntilAtLeastOneExists(hasContentDescription(description), timeout)
 
-    private fun waitForText(text: String, substring: Boolean = false) =
-        compose.waitUntilAtLeastOneExists(hasText(text, substring = substring), timeout)
+    private fun waitForText(text: String, substring: Boolean = false) {
+        try {
+            compose.waitUntilAtLeastOneExists(hasText(text, substring = substring), timeout)
+        } catch (e: androidx.compose.ui.test.ComposeTimeoutException) {
+            // Put what is actually on screen into the failure so CI logs show the real state.
+            throw AssertionError(
+                "Timed out waiting for text '$text'. Screen:\n" + compose.onRoot().printToString(maxDepth = 30),
+                e,
+            )
+        }
+    }
 
     @Test
     fun readSearchReflowThemeAndRotate() {
