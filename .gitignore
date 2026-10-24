@@ -39,3 +39,6 @@ keystore.properties
 
 # Local-only Gradle daemon JVM pin (Android Studio writes this; keep it off CI)
 gradle/gradle-daemon-jvm.properties
+
+# Kotlin compiler daemon session files (local build state)
+.kotlin/
