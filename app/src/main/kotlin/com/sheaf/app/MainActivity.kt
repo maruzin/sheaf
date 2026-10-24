@@ -15,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -74,9 +75,15 @@ private fun SheafApp(incomingUri: String? = null, appViewModel: AppViewModel = h
             }
         } else {
             val navController = rememberNavController()
+            // Decide the start screen once (saved across rotation). Recomputing it when onboarding
+            // completes rebuilt the nav graph mid-navigation: the back stack was reset and the
+            // onboarding -> library navigation pointed at a route that no longer existed (crash).
+            val startDestination = rememberSaveable {
+                if (state.onboardingDone) Routes.LIBRARY else Routes.ONBOARDING
+            }
             SheafNavHost(
                 navController = navController,
-                startDestination = if (state.onboardingDone) Routes.LIBRARY else Routes.ONBOARDING,
+                startDestination = startDestination,
                 modifier = Modifier.fillMaxSize(),
             )
             val pendingOpen by appViewModel.pendingOpenDoc.collectAsStateWithLifecycle()
