@@ -4,6 +4,110 @@ Running engineering log. Newest first. Every non-obvious decision gets one line 
 
 ---
 
+## Top-5% pass (2026-10-24): features, bugs, a11y, perf, strict lint, tests
+**New**
+- **Real zoom:** pages lay out zoom x wider with horizontal pan. Pinch runs on the Initial pointer
+  pass (it used to lose to the list scroll). Double-tap toggles 1x / 2.5x. Renders are snapped to 25%
+  steps and capped at 2048 px (`ZoomMath`).
+- **Reading mode (reflow):** page text → paragraphs (hyphen repair, wrapped-line joins), 80–200% text
+  size, themed, page headers. Scans show an "use OCR" hint (`TextSearch.paragraphs`, `ReflowContent`).
+- **Text index:** page text is extracted once per document and shared by search and reflow
+  (`PdfTextSearcher.pageTexts`). Search now matches phrases across line breaks.
+- **Night/Sepia themes recolour the page bitmap** (ColorMatrix), not just the background. "System"
+  follows light/dark.
+- **Tabs:** open documents persist (DataStore, max 8) and show as a chip row when more than one is
+  open. Switching replaces the reader on the back stack (`OpenTabs`, `ReaderTabsRow`).
+- **Tablet two-pane** at ≥840dp: library + reader side by side, one ViewModel per document.
+- **Library:** remove from library (cascades annotations, deletes Sheaf-owned files, releases SAF
+  grants), import errors in a snackbar, busy bar, byte-bounded thumbnail LruCache, readable scan
+  names, "Open with" de-duplication (name + size).
+- **Paywall** shows the real Play price. Settings purchase/restore give feedback.
+- **TalkBack:** "Page N of M", headings, tool on/off states, ink colours as radio buttons, 48dp
+  note targets, form field labels, live search result count, selectable theme radios, tab close
+  action, per-page action labels in Manage pages.
+- **Perf:** `:benchmark` module (cold-start macrobenchmark + Baseline Profile generator),
+  profileinstaller in the app, PdfBox loads with a 48 MB RAM cap and spills to disk.
+- **Strict lint:** `abortOnError` + `warningsAsErrors` on every module. Only version nags are off, and
+  third-party-jar findings are scoped in `lint.xml`. 0 issues.
+
+**Bugs fixed**
+- Reading position never saved: it was written from `onCleared()` on the already-cancelled
+  `viewModelScope`. Now it's written on ON_STOP and in onCleared through a process-level scope.
+- Rotation reloaded the document and jumped back to the old saved page. `open()` now keeps the live
+  session.
+- The "Default reading theme" setting did nothing. The reader now applies it.
+- OCR / compress / protect / form-save / print failed silently on password-protected PDFs (they read
+  the encrypted original). They now use the unlocked working copy.
+- Unlocked (decrypted) copies piled up in filesDir. They now go to cacheDir, are deleted in onCleared,
+  and are purged on app start.
+- Every PdfBox writer returned a path even when the source couldn't be read (phantom files shared or
+  added to the library). They now return null.
+- Print copied the file on the main thread (ANR risk). It now copies on a worker thread and
+  honours cancel.
+- `fallbackToDestructiveMigration` would wipe the library on any schema bump. Schemas are now
+  exported (`core/data/schemas`) and only a downgrade may reset.
+- ViewModel fields declared after `init {}` could NPE when a collector emitted immediately. Found by
+  the new tests.
+- Ink toolbar and Manage-pages buttons overflowed and were clipped on phones. Onboarding showed black
+  text in dark theme (earlier pass).
+
+**Round 2: found by the emulator tests (CI) and an independent code review**
+- Password-protected PDFs couldn't be imported at all, from either "Open with" or the picker: the
+  page count threw. They now import with 0 pages, the reader fills in the count after unlock, and the
+  library shows "Password protected".
+- "Open with" on a file:// link named every document "Document.pdf". It now uses the file name.
+- The saved page was never scrolled to (counter said 31, page 1 shown, then page 1 overwrote 31).
+  Open now scrolls to it, and nothing is saved unless a document actually loaded.
+- Tablet two-pane kept every opened document's renderer alive. Each one is released when it leaves
+  the pane, and folding below 840dp hands the document to the full-screen reader.
+- "Open with" de-dup only reuses a Sheaf-owned copy that is byte-identical (SHA-256), never a
+  different document with the same name and size.
+- "Remove from library" warns that Sheaf-only files are deleted permanently. It deletes files only
+  after the row is gone, closes the tab, and can't crash on IO errors.
+- Restore purchase gives the right message (owned / none / Play unreachable).
+- The renderer is closed safely during an in-flight render. Very tall pages keep their proportions.
+  "System" theme darkens pages in dark mode. Fast pinches compound zoom correctly.
+- A failed text extraction no longer looks like "no text layer". Search and reading mode share one
+  extraction.
+- Backups now include settings only (no PDFs or library DB, which broke the 25 MB quota and restored
+  rows pointing at missing files).
+
+**Tests:** 45 JVM tests (was 6), including Robolectric tests that run the real PdfBox engine
+(text, outline, AES round-trip, wrong-password cleanup, unreadable-source handling) and ViewModel
+tests for each bug above. `app/src/androidTest` has end-to-end UI tests (open, search, reflow,
+theme, rotation, password, tabs, remove). CI `device-tests.yml` runs them on API 35 + 29 emulators
+and runs the startup benchmark and Baseline Profile generation.
+
+**Decision: no PDFium swap.** `android.graphics.pdf.PdfRenderer` already runs PDFium inside the
+platform. The gaps it left (text, outline, passwords) are now covered by PdfBox. Swapping engines
+would add native-crash risk that can't be verified without devices, for little gain.
+
+## Play compliance pass (2026-10-24) — v1.0.1 (versionCode 3)
+Checked against Play's live requirements and verified with real local builds (assembleDebug,
+bundleRelease with R8, unit tests, lintRelease; JDK 21, Android SDK 36).
+- **targetSdk/compileSdk 35 → 36.** Play requires API 36 for new apps and updates since 31 Aug 2026.
+  Needed **AGP 8.7.3 → 8.13.2** and **Gradle wrapper 8.11.1 → 8.14.3**. Stayed on AGP 8.x and Kotlin 2.1.0
+  on purpose: AGP 9 / Kotlin 2.3+ is a big migration and not needed to publish.
+- **Play Billing 7.1.1 → 8.3.0.** v7 was blocked for new uploads from 31 Aug 2026. Added
+  `enableAutoServiceReconnection()`. **Fixed:** `restore()` now removes Pro when Play reports no owned
+  `sheaf_pro` (refund/revoke). Before, Pro could only ever be switched on. It only clears on a
+  successful (OK) Play response, so being offline never removes Pro.
+- **Edge-to-edge (forced at API 36):** all screens except onboarding already used Scaffold insets.
+  Onboarding now uses `safeDrawingPadding()` inside a `Surface`. The Surface also fixes black text in
+  dark theme.
+- **Misleading claims:** onboarding advertised "Ask — chat with your document", but `:feature:ai` is a
+  stub. Replaced it with "Annotate & sign". Re-add only when AI ships.
+- **16 KB pages:** every bundled `.so` (ML Kit OCR, DataStore, Compose graphics path) has 16 KB LOAD
+  alignment and passes `zipalign -c -P 16`.
+- **Lint TrustAllX509TrustManager** is from BouncyCastle (via PdfBox). R8 strips all BouncyCastle
+  classes from the release dex (verified), so it doesn't ship.
+- **Data safety:** ML Kit sends diagnostics, device/app info and an install ID to Google. The guide's old
+  "No data collected" answer was wrong. Fixed the guide, privacy policy (md + html) and listing copy.
+- ML Kit document scanner `16.0.0-beta1 → 16.0.0` (stable). CI now also runs `bundleRelease` (R8).
+- **Not verified here (no emulator/KVM):** behaviour on a device. Before production, run an internal-
+  testing build on a real Android 16 phone: open/scan/OCR/forms/sign, purchase + restore with a license
+  tester, and dark theme on the onboarding screen.
+
 ## M3 — Annotations (in progress, 2026-07-04)
 - **GREEN on CI:** ink drawing, highlighter, sticky notes (tap-to-place + edit + on-page markers),
   annotations overview sheet (jump/delete), and **signatures** (draw once → saved in DataStore →

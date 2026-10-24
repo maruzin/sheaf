@@ -16,6 +16,9 @@ interface AnnotationDao {
     @Query("DELETE FROM annotations WHERE id = :id")
     suspend fun delete(id: Long)
 
+    @Query("DELETE FROM annotations WHERE documentId = :documentId")
+    suspend fun deleteForDocument(documentId: Long)
+
     @Query("DELETE FROM annotations WHERE documentId = :documentId AND pageIndex = :pageIndex")
     suspend fun clearPage(documentId: Long, pageIndex: Int)
 }

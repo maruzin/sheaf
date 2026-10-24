@@ -24,6 +24,21 @@ internal fun Project.configureKotlinAndroid(
             targetCompatibility = JavaVersion.VERSION_17
             isCoreLibraryDesugaringEnabled = false
         }
+
+        // Strict lint on every module: any warning fails the build. Library-version nags are off
+        // (upgrades are deliberate), and third-party jar findings are scoped in /lint.xml.
+        lint {
+            abortOnError = true
+            warningsAsErrors = true
+            checkReleaseBuilds = true
+            lintConfig = rootProject.file("lint.xml")
+            disable += setOf(
+                "GradleDependency",
+                "NewerVersionAvailable",
+                "AndroidGradlePluginVersion",
+                "ObsoleteLintCustomCheck",
+            )
+        }
     }
 
     tasks.withType(KotlinCompile::class.java).configureEach {

@@ -7,7 +7,9 @@ import com.sheaf.core.data.billing.BillingManager
 import com.sheaf.core.domain.repository.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -38,11 +40,24 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { settings.setDefaultReaderTheme(theme) }
     }
 
+    private val _message = MutableStateFlow<String?>(null)
+    /** One-shot feedback for purchase / restore actions (shown as a toast, then consumed). */
+    val message: StateFlow<String?> = _message.asStateFlow()
+    fun consumeMessage() { _message.value = null }
+
     fun upgrade(activity: Activity) {
-        viewModelScope.launch { runCatching { billing.purchasePro(activity) } }
+        viewModelScope.launch {
+            _message.value = runCatching { billing.purchasePro(activity) }.getOrElse { "Couldn't start the purchase" }
+        }
     }
 
     fun restore() {
-        viewModelScope.launch { runCatching { billing.restore() } }
+        viewModelScope.launch {
+            _message.value = when (runCatching { billing.restore() }.getOrNull()) {
+                true -> "Sheaf Pro is active"
+                false -> "No previous purchase found"
+                null -> "Couldn't reach Google Play. Check your connection and try again."
+            }
+        }
     }
 }

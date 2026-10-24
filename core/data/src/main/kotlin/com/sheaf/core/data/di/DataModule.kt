@@ -24,7 +24,9 @@ object DatabaseModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): SheafDatabase =
         Room.databaseBuilder(context, SheafDatabase::class.java, "sheaf.db")
-            .fallbackToDestructiveMigration()
+            // Never wipe a user's library on upgrade: every schema change must ship a Migration
+            // (schemas are exported to core/data/schemas). Only a downgrade may reset.
+            .fallbackToDestructiveMigrationOnDowngrade()
             .build()
 
     @Provides

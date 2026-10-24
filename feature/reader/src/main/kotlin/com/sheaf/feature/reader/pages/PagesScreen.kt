@@ -144,7 +144,7 @@ private fun PageCard(
             if (bmp != null) {
                 Image(
                     bitmap = bmp.asImageBitmap(),
-                    contentDescription = "Page $number",
+                    contentDescription = "Page $number" + if (item.rotation != 0) ", rotated ${item.rotation} degrees" else "",
                     modifier = Modifier.fillMaxWidth().rotate(item.rotation.toFloat()),
                 )
             } else {
@@ -156,18 +156,21 @@ private fun PageCard(
             style = MaterialTheme.typography.labelMedium,
             modifier = Modifier.padding(top = 4.dp),
         )
+        // Two rows of two: four 48dp touch targets don't fit the 140dp-min grid cell in one row.
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onLeft, enabled = number > 1) {
-                Icon(Icons.Filled.KeyboardArrowLeft, contentDescription = "Move left")
-            }
-            IconButton(onClick = onRotate) {
-                Icon(Icons.Filled.RotateRight, contentDescription = "Rotate")
-            }
-            IconButton(onClick = onDelete, enabled = total > 1) {
-                Icon(Icons.Filled.Delete, contentDescription = "Delete")
+                Icon(Icons.Filled.KeyboardArrowLeft, contentDescription = "Move page $number earlier")
             }
             IconButton(onClick = onRight, enabled = number < total) {
-                Icon(Icons.Filled.KeyboardArrowRight, contentDescription = "Move right")
+                Icon(Icons.Filled.KeyboardArrowRight, contentDescription = "Move page $number later")
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onRotate) {
+                Icon(Icons.Filled.RotateRight, contentDescription = "Rotate page $number")
+            }
+            IconButton(onClick = onDelete, enabled = total > 1) {
+                Icon(Icons.Filled.Delete, contentDescription = "Delete page $number")
             }
         }
     }

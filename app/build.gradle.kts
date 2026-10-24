@@ -5,6 +5,7 @@ plugins {
     alias(libs.plugins.sheaf.application)
     alias(libs.plugins.sheaf.compose)
     alias(libs.plugins.sheaf.hilt)
+    alias(libs.plugins.baselineprofile)
 }
 
 // Release signing is read from an untracked keystore.properties at the repo root (see
@@ -50,12 +51,15 @@ android {
         debug {
             applicationIdSuffix = ".debug"
         }
+        // Build types the Baseline Profile plugin adds for benchmarking. Without a release keystore
+        // (CI, fresh clones) sign them with the debug key so they can be installed on an emulator.
+        // They are never uploaded to Play.
+        configureEach {
+            if (name == "benchmarkRelease" || name == "nonMinifiedRelease") {
+                if (!keystorePropertiesFile.exists()) signingConfig = signingConfigs.getByName("debug")
+            }
+        }
     }
-    lint {
-        // In-development: report issues but don't fail the build. Re-enable strict lint at M8 hardening.
-        abortOnError = false
-    }
-
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
@@ -77,7 +81,17 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.compose.material.icons.extended)
 
+    // Installs the app's Baseline Profile (and the profiles shipped by AndroidX libraries) at install
+    // time, so startup and first scroll run precompiled code instead of interpreting.
+    implementation(libs.androidx.profileinstaller)
+    baselineProfile(project(":benchmark"))
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.rules)
+    androidTestImplementation(libs.androidx.test.core)
+    // Builds real (and password-protected) PDFs inside the end-to-end tests.
+    androidTestImplementation(libs.pdfbox.android)
     androidTestImplementation(libs.androidx.espresso.core)
 }

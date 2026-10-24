@@ -1,6 +1,6 @@
 # Sheaf — Privacy Policy
 
-_Last updated: 5 July 2026_
+_Last updated: 24 October 2026_
 
 Sheaf ("the app") is a PDF reader and toolkit for Android. This policy explains what the app does and
 does not do with your information. **Sheaf is built to keep your documents on your device.**
@@ -27,7 +27,15 @@ does not do with your information. **Sheaf is built to keep your documents on yo
   over the network.
 
 ## Data we collect
-None. Sheaf does not collect, store, or share personal data on our own servers.
+Sheaf does not collect, store, or share personal data on our own servers, and we never receive your
+documents.
+
+The Google ML Kit libraries used for scanning and OCR send limited **diagnostic data to Google**:
+device information (manufacturer, model, OS version), app information (package name, app version),
+a per-installation identifier that does not identify you or your device, and performance/error
+metrics. Google uses this to diagnose and improve ML Kit, encrypts it in transit (HTTPS), and does not
+share it with third parties. It never includes your documents, images, or recognized text. Details:
+https://developers.google.com/ml-kit/android-data-disclosure
 
 ## Third-party services
 - **Google Play services / ML Kit** (document scanning, on-device OCR) — see Google's Privacy Policy.

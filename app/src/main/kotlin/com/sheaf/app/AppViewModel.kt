@@ -1,5 +1,6 @@
 package com.sheaf.app
 
+import androidx.core.net.toUri
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -20,7 +21,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.sheaf.feature.reader.library.countPages
 import java.io.File
+import java.security.MessageDigest
 import javax.inject.Inject
 
 data class AppState(
@@ -52,7 +55,7 @@ class AppViewModel @Inject constructor(
         viewModelScope.launch {
             val id = withContext(Dispatchers.IO) {
                 runCatching {
-                    val src = Uri.parse(uriString)
+                    val src = uriString.toUri()
                     val name = queryDisplayName(src)
                     val dir = File(context.filesDir, "opened").apply { mkdirs() }
                     val out = File(dir, "open_${System.currentTimeMillis()}.pdf")
@@ -60,22 +63,26 @@ class AppViewModel @Inject constructor(
                         out.outputStream().use { output -> input.copyTo(output) }
                         true
                     } ?: false
-                    if (!copied) return@runCatching null
-                    val fileUri = Uri.fromFile(out).toString()
-                    val pageCount = renderFactory.open(fileUri).let { s ->
-                        try {
-                            s.pageCount
-                        } finally {
-                            s.close()
-                        }
+                    if (!copied || out.length() == 0L) {
+                        out.delete()
+                        return@runCatching null
                     }
+                    // Opening the same file again reuses its library entry instead of stacking
+                    // copies, but only when an earlier Sheaf-owned copy is byte-for-byte identical
+                    // (name + size alone could match a different document).
+                    existingIdenticalCopy(name, out)?.let { existingId ->
+                        out.delete()
+                        return@runCatching existingId
+                    }
+                    val fileUri = Uri.fromFile(out).toString()
                     repository.upsert(
                         Document(
                             id = 0,
                             uri = fileUri,
                             displayName = name,
                             sizeBytes = out.length(),
-                            pageCount = pageCount,
+                            // 0 for password-protected files; the reader fills it in after unlock.
+                            pageCount = countPages(renderFactory, fileUri),
                             lastOpenedAt = System.currentTimeMillis(),
                             addedAt = System.currentTimeMillis(),
                         ),
@@ -86,7 +93,32 @@ class AppViewModel @Inject constructor(
         }
     }
 
+    private suspend fun existingIdenticalCopy(name: String, copy: File): Long? {
+        val candidate = repository.findByNameAndSize(name, copy.length()) ?: return null
+        val candidateUri = candidate.uri.toUri()
+        if (candidateUri.scheme != "file") return null
+        val candidateFile = candidateUri.path?.let { File(it) } ?: return null
+        val ownDir = File(context.filesDir, "opened").canonicalPath + File.separator
+        if (!candidateFile.exists() || !candidateFile.canonicalPath.startsWith(ownDir)) return null
+        return if (sha256(candidateFile).contentEquals(sha256(copy))) candidate.id else null
+    }
+
+    private fun sha256(file: File): ByteArray {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest()
+    }
+
     private fun queryDisplayName(uri: Uri): String {
+        // file:// links have no content provider to ask; use the file's own name.
+        if (uri.scheme == "file") return uri.lastPathSegment?.takeIf { it.isNotBlank() } ?: "Document.pdf"
         var name = "Document.pdf"
         runCatching {
             context.contentResolver.query(uri, null, null, null, null)?.use { c ->

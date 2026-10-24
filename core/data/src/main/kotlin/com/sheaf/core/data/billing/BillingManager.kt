@@ -49,6 +49,8 @@ class BillingManager @Inject constructor(
         .enablePendingPurchases(
             PendingPurchasesParams.newBuilder().enableOneTimeProducts().build(),
         )
+        // Billing Library 8+: re-establish the Play connection automatically after a disconnect.
+        .enableAutoServiceReconnection()
         .build()
 
     /** Call once at app launch to restore an existing entitlement. */
@@ -79,13 +81,39 @@ class BillingManager @Inject constructor(
         return if (result.responseCode == BillingClient.BillingResponseCode.OK) null else result.debugMessage
     }
 
-    suspend fun restore() {
+    /** Localised price of Sheaf Pro from Play (e.g. "€4.99"), or null if unavailable. */
+    suspend fun proPrice(): String? {
+        ensureConnected()
+        val product = QueryProductDetailsParams.Product.newBuilder()
+            .setProductId(PRO_ID)
+            .setProductType(BillingClient.ProductType.INAPP)
+            .build()
+        val params = QueryProductDetailsParams.newBuilder().setProductList(listOf(product)).build()
+        return runCatching {
+            client.queryProductDetails(params).productDetailsList?.firstOrNull()
+                ?.oneTimePurchaseOfferDetails?.formattedPrice
+        }.getOrNull()
+    }
+
+    /**
+     * Re-checks Play for the Pro purchase. Returns true if owned, false if Play reports none,
+     * or null if Play couldn't be reached (the cached entitlement is then left unchanged).
+     */
+    suspend fun restore(): Boolean? {
         ensureConnected()
         val params = QueryPurchasesParams.newBuilder()
             .setProductType(BillingClient.ProductType.INAPP)
             .build()
-        val result = runCatching { client.queryPurchasesAsync(params) }.getOrNull() ?: return
+        val result = runCatching { client.queryPurchasesAsync(params) }.getOrNull() ?: return null
+        // Only trust a successful answer from Play; on errors keep the cached entitlement.
+        if (result.billingResult.responseCode != BillingClient.BillingResponseCode.OK) return null
+        val owned = result.purchasesList.any {
+            it.products.contains(PRO_ID) && it.purchaseState == Purchase.PurchaseState.PURCHASED
+        }
         result.purchasesList.forEach { handlePurchase(it) }
+        // Play no longer reports the purchase (refunded or revoked): remove Pro.
+        if (!owned) settings.setPro(false)
+        return owned
     }
 
     private suspend fun handlePurchase(purchase: Purchase) {

@@ -1,5 +1,7 @@
 package com.sheaf.feature.reader.forms
 
+import androidx.core.net.toUri
+import com.sheaf.feature.reader.pdf.PdfBoxMemory
 import android.content.Context
 import android.net.Uri
 import com.sheaf.core.domain.model.FormField
@@ -28,8 +30,8 @@ class PdfBoxFormReader @Inject constructor(
         ensureInit()
         val out = ArrayList<FormField>()
         runCatching {
-            context.contentResolver.openInputStream(Uri.parse(uri))?.use { input ->
-                PDDocument.load(input).use { doc ->
+            context.contentResolver.openInputStream(uri.toUri())?.use { input ->
+                PDDocument.load(input, PdfBoxMemory.setting()).use { doc ->
                     val acro = doc.documentCatalog?.acroForm ?: return@use
                     val pages = doc.pages.toList()
                     for (field in acro.fieldTree) {
@@ -66,8 +68,8 @@ class PdfBoxFormReader @Inject constructor(
         ensureInit()
         runCatching {
             val out = File(context.cacheDir, "filled_${System.currentTimeMillis()}.pdf")
-            context.contentResolver.openInputStream(Uri.parse(uri))?.use { input ->
-                PDDocument.load(input).use { doc ->
+            context.contentResolver.openInputStream(uri.toUri())?.use { input ->
+                PDDocument.load(input, PdfBoxMemory.setting()).use { doc ->
                     val acro = doc.documentCatalog?.acroForm ?: return@withContext null
                     values.forEach { (name, value) ->
                         when (val field = acro.getField(name)) {
@@ -83,7 +85,8 @@ class PdfBoxFormReader @Inject constructor(
                     doc.save(out)
                 }
             }
-            out.absolutePath
+            // Only report success if something was actually written (null stream = unreadable source).
+            out.takeIf { it.length() > 0 }?.absolutePath
         }.getOrNull()
     }
 

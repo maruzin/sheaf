@@ -3,6 +3,8 @@ plugins {
 }
 android {
     namespace = "com.sheaf.feature.reader"
+    // Robolectric tests run the real PdfBox engine, which loads fonts/resources from AAR assets.
+    testOptions.unitTests.isIncludeAndroidResources = true
 }
 dependencies {
     implementation(project(":core:data"))
@@ -14,6 +16,8 @@ dependencies {
     // M5: on-device document scanner (capture, auto-crop, multi-page → PDF) + OCR text recognition.
     implementation(libs.mlkit.doc.scanner)
     implementation(libs.mlkit.text.recognition)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
     // M1 baseline renders via the platform android.graphics.pdf.PdfRenderer — no external engine dep.
     // PDFium / androidx.pdf are the production-engine candidates (benchmark), swappable behind
     // PdfRenderSource. See BUILD_NOTES.md.

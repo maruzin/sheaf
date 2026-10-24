@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!-- BouncyCastle (pulled in by PdfBox) ships an EST client with a trust-all TrustManager.
+         Sheaf never calls it and R8 strips every BouncyCastle class from release builds
+         (verified: 0 org/bouncycastle classes in the release dex). -->
+    <issue id="TrustAllX509TrustManager">
+        <ignore path="**/org.bouncycastle/**" />
+    </issue>
+    <!-- Adaptive launcher icons stay in mipmap-anydpi-v26 (the unqualified folder fails aapt2
+         resource linking for <adaptive-icon> with this toolchain). -->
+    <issue id="ObsoleteSdkInt">
+        <ignore path="**/mipmap-anydpi-v26" />
+    </issue>
+</lint>

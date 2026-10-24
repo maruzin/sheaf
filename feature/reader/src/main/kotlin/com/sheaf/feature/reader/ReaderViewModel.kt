@@ -23,6 +23,17 @@ import com.sheaf.feature.reader.render.PdfRenderSource
 import com.sheaf.feature.reader.render.PdfRenderSourceFactory
 import com.sheaf.feature.reader.search.PdfOutlineExtractor
 import com.sheaf.feature.reader.search.PdfTextSearcher
+import com.sheaf.feature.reader.search.TextSearch
+import com.sheaf.core.domain.tabs.OpenTabsRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -30,6 +41,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+/** Outlives any one ViewModel so position writes from onCleared() still complete. */
+private val persistScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
 @HiltViewModel
 class ReaderViewModel @Inject constructor(
@@ -45,6 +59,7 @@ class ReaderViewModel @Inject constructor(
     private val ocr: PdfOcr,
     private val billing: BillingManager,
     private val flattener: AnnotationFlattener,
+    private val openTabs: OpenTabsRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ReaderUiState())
@@ -52,12 +67,33 @@ class ReaderViewModel @Inject constructor(
 
     private var source: PdfRenderSource? = null
 
+    // Declared before init {}: the collectors started there can emit immediately and touch these.
+    private var openPassword: String? = null
+    private var openJob: Job? = null
+    private var searchJob: Job? = null
+    private var themeChosen = false
+    private var pageTextCache: List<String>? = null
+    private val tabNames = HashMap<Long, String>()
+    private val textMutex = Mutex()
+
+    // Path of the decrypted temp copy for a password-protected document (deleted in onCleared).
+    private var unlockedCopy: String? = null
+
     init {
         viewModelScope.launch {
             settings.signature.collect { enc ->
                 val pts = decodePoints(enc)
                 _state.update { it.copy(signaturePoints = pts, hasSignature = pts.isNotEmpty()) }
             }
+        }
+        viewModelScope.launch {
+            // Apply the user's default reading theme unless they already picked one in this session.
+            val default = runCatching { settings.defaultReaderTheme.first() }.getOrNull()
+            val theme = ReaderTheme.entries.firstOrNull { it.name.equals(default, ignoreCase = true) }
+            if (theme != null && !themeChosen) _state.update { it.copy(theme = theme) }
+        }
+        viewModelScope.launch {
+            openTabs.tabs.collect { ids -> refreshTabs(ids) }
         }
         viewModelScope.launch {
             settings.isPro.collect { pro ->
@@ -71,7 +107,14 @@ class ReaderViewModel @Inject constructor(
             is ReaderEvent.Open -> open(event.documentId)
             is ReaderEvent.PageChanged -> _state.update { it.copy(currentPage = event.page) }
             is ReaderEvent.ZoomChanged -> _state.update { it.copy(zoom = event.zoom) }
-            is ReaderEvent.SetTheme -> _state.update { it.copy(theme = event.theme) }
+            is ReaderEvent.SetTheme -> {
+                themeChosen = true
+                _state.update { it.copy(theme = event.theme) }
+            }
+            ReaderEvent.ToggleReflow -> toggleReflow()
+            is ReaderEvent.SetReflowScale ->
+                _state.update { it.copy(reflowScale = event.scale.coerceIn(MIN_REFLOW_SCALE, MAX_REFLOW_SCALE)) }
+            is ReaderEvent.CloseTab -> viewModelScope.launch { openTabs.close(event.documentId) }
             ReaderEvent.ToggleAnnotate -> _state.update { it.copy(annotating = !it.annotating) }
             is ReaderEvent.SetInkColor -> _state.update { it.copy(inkColorArgb = event.argb) }
             is ReaderEvent.SetHighlighter -> _state.update { it.copy(highlighter = event.on, noteMode = false, signatureMode = false) }
@@ -90,7 +133,10 @@ class ReaderViewModel @Inject constructor(
             ReaderEvent.ConsumeOcr -> _state.update { it.copy(ocrDocumentId = null) }
             ReaderEvent.FlattenShare -> flattenAndShare()
             ReaderEvent.ConsumeFlattened -> _state.update { it.copy(flattenedPath = null) }
-            ReaderEvent.ShowPaywall -> _state.update { it.copy(showPaywall = true) }
+            ReaderEvent.ShowPaywall -> {
+                _state.update { it.copy(showPaywall = true) }
+                loadPrice()
+            }
             ReaderEvent.DismissPaywall -> _state.update { it.copy(showPaywall = false) }
             ReaderEvent.ConsumeBillingMessage -> _state.update { it.copy(billingMessage = null) }
             is ReaderEvent.SubmitOpenPassword -> submitOpenPassword(event.password)
@@ -111,14 +157,19 @@ class ReaderViewModel @Inject constructor(
         }
     }
 
-    private var openPassword: String? = null
 
     // The uri used for PdfBox text operations (search/outline/forms). Equals the document uri, or a
     // decrypted temp copy when the document is password-protected.
     private var textUri: String = ""
 
     private fun open(documentId: Long) {
-        viewModelScope.launch {
+        // Re-composition (e.g. rotation) re-sends Open for the same document: keep the live session
+        // instead of reloading, which used to jump back to the last *saved* page.
+        val current = _state.value
+        if (current.documentId == documentId && source != null && !current.needsPassword) return
+        if (current.documentId == documentId && current.isLoading && openJob?.isActive == true) return
+        openJob?.cancel()
+        openJob = viewModelScope.launch {
             _state.update { it.copy(isLoading = true, documentId = documentId, error = null) }
             val doc = repository.document(documentId)
             if (doc == null) {
@@ -136,6 +187,8 @@ class ReaderViewModel @Inject constructor(
                     }
                     return@launch
                 }
+                discardUnlockedCopy() // a previous unlock attempt's copy, if any
+                unlockedCopy = decrypted
                 renderUri = android.net.Uri.fromFile(java.io.File(decrypted)).toString()
             } else {
                 renderUri = doc.uri
@@ -145,6 +198,7 @@ class ReaderViewModel @Inject constructor(
             if (opened == null) {
                 // PdfRenderer throws SecurityException for password-protected PDFs — prompt for a password.
                 val encrypted = result.exceptionOrNull() is SecurityException
+                if (password != null) discardUnlockedCopy() // decrypted but unrenderable: don't keep it
                 _state.update {
                     it.copy(
                         isLoading = false,
@@ -157,16 +211,25 @@ class ReaderViewModel @Inject constructor(
             source?.close() // release the previous renderer + file descriptor before replacing it
             source = opened
             textUri = renderUri
-            val restored = repository.readingPosition(documentId)
+            pageTextCache = null
+            runCatching { repository.markOpened(documentId) }
+            runCatching { openTabs.open(documentId) }
+            // Protected PDFs are imported before they can be counted (page count 0): fill it in now.
+            if (doc.pageCount != opened.pageCount) runCatching { repository.setPageCount(documentId, opened.pageCount) }
+            val restored = runCatching { repository.readingPosition(documentId) }.getOrNull()
+            val restoredPage = restored?.pageIndex?.takeIf { it in 0 until opened.pageCount } ?: 0
             _state.update {
                 it.copy(
                     isLoading = false,
                     needsPassword = false,
                     passwordError = null,
                     uri = doc.uri,
+                    workingUri = renderUri,
                     displayName = doc.displayName,
                     pageCount = opened.pageCount,
-                    currentPage = restored?.pageIndex ?: 0,
+                    currentPage = restoredPage,
+                    // Scroll the page list to where the user left off (it starts at page 1).
+                    pendingScrollPage = restoredPage.takeIf { p -> p > 0 },
                     zoom = restored?.zoom ?: 1f,
                     outline = opened.outline(),
                 )
@@ -189,9 +252,10 @@ class ReaderViewModel @Inject constructor(
             _state.update { it.copy(searchResults = emptyList(), searching = false) }
             return
         }
-        viewModelScope.launch {
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
             _state.update { it.copy(searching = true) }
-            val results = runCatching { searcher.search(uri, query) }.getOrDefault(emptyList())
+            val results = TextSearch.find(pageTexts(uri).orEmpty(), query)
             _state.update {
                 it.copy(
                     searching = false,
@@ -199,9 +263,66 @@ class ReaderViewModel @Inject constructor(
                     searchIndex = 0,
                     pendingScrollPage = results.firstOrNull()?.pageIndex,
                     currentPage = results.firstOrNull()?.pageIndex ?: it.currentPage,
+                    textLayerMissing = it.textLayerMissing || pageTextCache?.all { p -> p.isBlank() } == true,
                 )
             }
         }
+    }
+
+    /** Page text, extracted once per document and shared by search and reflow. */
+    /**
+     * Page text, extracted once per document. Concurrent callers (search + reading mode) wait for
+     * the same extraction instead of parsing the PDF twice. Returns null if extraction failed.
+     */
+    private suspend fun pageTexts(uri: String): List<String>? = textMutex.withLock {
+        pageTextCache?.let { return@withLock it }
+        val texts = runCatching { searcher.pageTexts(uri) }.getOrNull()
+        if (texts != null) pageTextCache = texts
+        texts
+    }
+
+    private fun toggleReflow() {
+        val s = _state.value
+        if (s.reflow) {
+            _state.update { it.copy(reflow = false) }
+            return
+        }
+        val uri = textUri.ifBlank { s.uri }
+        if (uri.isBlank()) return
+        _state.update { it.copy(reflow = true, reflowLoading = pageTextCache == null) }
+        viewModelScope.launch {
+            val texts = pageTexts(uri)
+            if (texts == null) {
+                // billingMessage is the reader's one-shot toast channel.
+                _state.update { it.copy(reflow = false, reflowLoading = false, billingMessage = "Couldn't read this document's text") }
+                return@launch
+            }
+            val paragraphs = texts.map { TextSearch.paragraphs(it) }
+            _state.update {
+                it.copy(
+                    reflowLoading = false,
+                    reflowPages = paragraphs,
+                    textLayerMissing = texts.all { t -> t.isBlank() },
+                )
+            }
+        }
+    }
+
+    private suspend fun refreshTabs(ids: List<Long>) {
+        val tabs = ids.mapNotNull { id ->
+            val cached = tabNames[id]
+            val lookup = if (cached == null) runCatching { repository.document(id) } else null
+            val name = cached ?: lookup?.getOrNull()?.displayName
+            if (name == null) {
+                // Only drop the tab when the document is confirmed gone (not on a transient DB error).
+                if (lookup?.isSuccess == true) runCatching { openTabs.close(id) }
+                null
+            } else {
+                tabNames[id] = name
+                ReaderTab(id, name)
+            }
+        }
+        _state.update { it.copy(tabs = tabs) }
     }
 
     private fun stepResult(delta: Int) {
@@ -228,7 +349,7 @@ class ReaderViewModel @Inject constructor(
     }
 
     private fun saveForm() {
-        val uri = _state.value.uri
+        val uri = textUri.ifBlank { _state.value.uri }
         if (uri.isBlank() || _state.value.formFields.isEmpty()) return
         viewModelScope.launch {
             _state.update { it.copy(savingForm = true) }
@@ -241,7 +362,16 @@ class ReaderViewModel @Inject constructor(
     private fun blockedByPaywall(): Boolean {
         if (_state.value.isPro) return false
         _state.update { it.copy(showPaywall = true) }
+        loadPrice()
         return true
+    }
+
+    private fun loadPrice() {
+        if (_state.value.proPrice != null) return
+        viewModelScope.launch {
+            val price = runCatching { billing.proPrice() }.getOrNull()
+            if (price != null) _state.update { it.copy(proPrice = price) }
+        }
     }
 
     fun upgrade(activity: Activity) {
@@ -254,7 +384,7 @@ class ReaderViewModel @Inject constructor(
     }
 
     private fun protect(password: String) {
-        val uri = _state.value.uri
+        val uri = textUri.ifBlank { _state.value.uri }
         if (uri.isBlank() || password.isBlank()) return
         if (blockedByPaywall()) return
         viewModelScope.launch {
@@ -265,7 +395,7 @@ class ReaderViewModel @Inject constructor(
     }
 
     private fun compress() {
-        val uri = _state.value.uri
+        val uri = textUri.ifBlank { _state.value.uri }
         if (uri.isBlank()) return
         if (blockedByPaywall()) return
         viewModelScope.launch {
@@ -292,7 +422,7 @@ class ReaderViewModel @Inject constructor(
         if (blockedByPaywall()) return
         viewModelScope.launch {
             _state.update { it.copy(ocrRunning = true) }
-            val path = runCatching { ocr.makeSearchable(s.uri) }.getOrNull()
+            val path = runCatching { ocr.makeSearchable(textUri.ifBlank { s.uri }) }.getOrNull()
             if (path == null) {
                 _state.update { it.copy(ocrRunning = false, error = "Couldn't OCR this document") }
                 return@launch
@@ -431,16 +561,50 @@ class ReaderViewModel @Inject constructor(
     fun persistPosition() {
         val s = _state.value
         val id = s.documentId ?: return
-        viewModelScope.launch {
-            repository.saveReadingPosition(
-                ReadingPosition(id, s.currentPage, s.zoom, offsetX = 0f, offsetY = 0f),
-            )
+        // Never overwrite a saved position with page 0 when nothing was actually shown
+        // (password prompt cancelled, load failed, app backgrounded mid-load).
+        if (source == null || s.pageCount == 0 || s.isLoading) return
+        // onCleared() runs after viewModelScope is cancelled, so this write must not use it.
+        persistScope.launch {
+            withContext(NonCancellable) {
+                runCatching {
+                    repository.saveReadingPosition(
+                        ReadingPosition(id, s.currentPage, s.zoom, offsetX = 0f, offsetY = 0f),
+                    )
+                }
+            }
         }
+    }
+
+    /**
+     * Frees the renderer, caches and any unlocked copy while keeping the ViewModel reusable: the
+     * next Open re-loads. Used by the tablet two-pane reader, whose ViewModels outlive the pane.
+     */
+    fun release() {
+        persistPosition()
+        openJob?.cancel()
+        source?.close()
+        source = null
+        pageTextCache = null
+        discardUnlockedCopy()
+        _state.update { it.copy(reflow = false, reflowPages = emptyList(), searchResults = emptyList()) }
+    }
+
+    private fun discardUnlockedCopy() {
+        // Plaintext copy of a protected PDF: never keep it longer than the session that needs it.
+        unlockedCopy?.let { runCatching { java.io.File(it).delete() } }
+        unlockedCopy = null
     }
 
     override fun onCleared() {
         persistPosition()
         source?.close()
         source = null
+        discardUnlockedCopy()
+    }
+
+    private companion object {
+        const val MIN_REFLOW_SCALE = 0.8f
+        const val MAX_REFLOW_SCALE = 2.0f
     }
 }

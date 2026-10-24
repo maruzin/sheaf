@@ -1,5 +1,7 @@
 package com.sheaf.feature.reader.security
 
+import androidx.core.net.toUri
+import com.sheaf.feature.reader.pdf.PdfBoxMemory
 import android.content.Context
 import android.net.Uri
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
@@ -21,10 +23,10 @@ class PdfBoxSecurity @Inject constructor(
     override suspend fun encrypt(uri: String, password: String): String? = withContext(io) {
         if (password.isBlank()) return@withContext null
         ensureInit()
-        runCatching {
-            val out = File(context.cacheDir, "protected_${System.currentTimeMillis()}.pdf")
-            context.contentResolver.openInputStream(Uri.parse(uri))?.use { input ->
-                PDDocument.load(input).use { doc ->
+        val out = File(context.cacheDir, "protected_${System.currentTimeMillis()}.pdf")
+        val saved = runCatching {
+            context.contentResolver.openInputStream(uri.toUri())?.use { input ->
+                PDDocument.load(input, PdfBoxMemory.setting()).use { doc ->
                     val permissions = AccessPermission()
                     val policy = StandardProtectionPolicy(password, password, permissions)
                     policy.encryptionKeyLength = 128
@@ -32,25 +34,38 @@ class PdfBoxSecurity @Inject constructor(
                     doc.protect(policy)
                     doc.save(out)
                 }
-            }
-            out.absolutePath
-        }.getOrNull()
+                true
+            } ?: false
+        }.getOrDefault(false)
+        if (saved && out.length() > 0) out.absolutePath else null.also { out.delete() }
     }
 
     override suspend fun decrypt(uri: String, password: String): String? = withContext(io) {
         ensureInit()
-        runCatching {
-            val dir = File(context.filesDir, "unlocked").apply { mkdirs() }
-            val out = File(dir, "unlocked_${System.currentTimeMillis()}.pdf")
-            context.contentResolver.openInputStream(Uri.parse(uri))?.use { input ->
-                PDDocument.load(input, password).use { doc ->
+        // cacheDir: never backed up, and purged by purgeUnlockedCopies() when the reader closes.
+        val out = File(unlockedDir().apply { mkdirs() }, "unlocked_${System.currentTimeMillis()}.pdf")
+        val saved = runCatching {
+            context.contentResolver.openInputStream(uri.toUri())?.use { input ->
+                PDDocument.load(input, password, PdfBoxMemory.setting()).use { doc ->
                     doc.setAllSecurityToBeRemoved(true)
                     doc.save(out)
                 }
-            }
+                true
+            } ?: false
+        }.getOrDefault(false)
+        if (saved && out.length() > 0) {
             out.absolutePath
-        }.getOrNull()
+        } else {
+            out.delete() // wrong password or unreadable source: leave nothing behind
+            null
+        }
     }
+
+    override suspend fun purgeUnlockedCopies() {
+        withContext(io) { unlockedDir().listFiles()?.forEach { it.delete() } }
+    }
+
+    private fun unlockedDir() = File(context.cacheDir, "unlocked")
 
     private fun ensureInit() {
         if (initialized.compareAndSet(false, true)) PDFBoxResourceLoader.init(context.applicationContext)

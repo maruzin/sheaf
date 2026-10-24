@@ -1,5 +1,7 @@
 package com.sheaf.feature.reader.ocr
 
+import androidx.core.net.toUri
+import com.sheaf.feature.reader.pdf.PdfBoxMemory
 import android.content.Context
 import android.net.Uri
 import com.google.android.gms.tasks.Tasks
@@ -35,8 +37,8 @@ class MlKitPdfOcr @Inject constructor(
         runCatching {
             val dir = File(context.filesDir, "searchable").apply { mkdirs() }
             val out = File(dir, "ocr_${System.currentTimeMillis()}.pdf")
-            context.contentResolver.openInputStream(Uri.parse(uri))?.use { input ->
-                PDDocument.load(input).use { doc ->
+            context.contentResolver.openInputStream(uri.toUri())?.use { input ->
+                PDDocument.load(input, PdfBoxMemory.setting()).use { doc ->
                     val renderer = PDFRenderer(doc)
                     for (i in 0 until doc.numberOfPages) {
                         runCatching { ocrPage(doc, renderer, i, recognizer) }
@@ -44,7 +46,8 @@ class MlKitPdfOcr @Inject constructor(
                     doc.save(out)
                 }
             }
-            out.absolutePath
+            // Only report success if something was actually written (null stream = unreadable source).
+            out.takeIf { it.length() > 0 }?.absolutePath
         }.getOrNull()
     }
 

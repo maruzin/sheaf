@@ -1,5 +1,7 @@
 package com.sheaf.feature.reader.pages
 
+import androidx.core.net.toUri
+import com.sheaf.feature.reader.pdf.PdfBoxMemory
 import android.content.Context
 import android.net.Uri
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
@@ -22,8 +24,8 @@ class PdfBoxPageEditor @Inject constructor(
         runCatching {
             val dir = File(context.filesDir, "edited").apply { mkdirs() }
             val out = File(dir, "pages_${System.currentTimeMillis()}.pdf")
-            context.contentResolver.openInputStream(Uri.parse(uri))?.use { input ->
-                PDDocument.load(input).use { src ->
+            context.contentResolver.openInputStream(uri.toUri())?.use { input ->
+                PDDocument.load(input, PdfBoxMemory.setting()).use { src ->
                     val srcPages = src.pages.toList()
                     PDDocument().use { dst ->
                         plan.forEach { op ->
@@ -36,7 +38,8 @@ class PdfBoxPageEditor @Inject constructor(
                     }
                 }
             }
-            out.absolutePath
+            // Only report success if something was actually written (null stream = unreadable source).
+            out.takeIf { it.length() > 0 }?.absolutePath
         }.getOrNull()
     }
 
