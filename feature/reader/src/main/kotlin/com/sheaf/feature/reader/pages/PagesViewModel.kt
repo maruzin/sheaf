@@ -46,7 +46,12 @@ class PagesViewModel @Inject constructor(
                     )
                 }
             }.onFailure { t ->
-                _state.update { it.copy(isLoading = false, error = t.message ?: "Failed to open") }
+                val message = if (t is SecurityException) {
+                    "This PDF is password-protected. Remove the password before managing its pages."
+                } else {
+                    "Couldn't open this document"
+                }
+                _state.update { it.copy(isLoading = false, error = message) }
             }
         }
     }

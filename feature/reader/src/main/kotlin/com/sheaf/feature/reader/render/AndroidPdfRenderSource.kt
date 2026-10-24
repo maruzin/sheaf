@@ -1,5 +1,7 @@
 package com.sheaf.feature.reader.render
 
+import androidx.core.graphics.createBitmap
+import androidx.core.net.toUri
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -40,7 +42,7 @@ class AndroidPdfRenderSource private constructor(
         withContext(io) {
             require(widthPx > 0 && heightPx > 0) { "render size must be positive" }
             mutex.withLock {
-                val bitmap = Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888)
+                val bitmap = createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888)
                 bitmap.eraseColor(Color.WHITE)
                 renderer.openPage(pageIndex).use { page ->
                     page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
@@ -63,7 +65,7 @@ class AndroidPdfRenderSource private constructor(
         private val io: CoroutineDispatcher,
     ) : PdfRenderSourceFactory {
         override suspend fun open(uri: String, password: String?): PdfRenderSource = withContext(io) {
-            val pfd = context.contentResolver.openFileDescriptor(Uri.parse(uri), "r")
+            val pfd = context.contentResolver.openFileDescriptor(uri.toUri(), "r")
                 ?: error("Could not open $uri")
             val renderer = PdfRenderer(pfd)
             val ratios = FloatArray(renderer.pageCount)

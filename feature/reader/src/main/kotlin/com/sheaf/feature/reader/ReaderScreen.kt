@@ -1,5 +1,6 @@
 package com.sheaf.feature.reader
 
+import androidx.core.net.toUri
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
@@ -11,7 +12,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -81,7 +81,6 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.ImeAction
@@ -107,6 +106,28 @@ import com.sheaf.core.domain.model.NormPoint
 import com.sheaf.feature.reader.print.printPdf
 import java.io.File
 import kotlin.math.roundToInt
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.material.icons.filled.AutoStories
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.TextDecrease
+import androidx.compose.material.icons.filled.TextIncrease
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 
 private val InkColors = listOf(
     0xFFE4713B.toInt(), 0xFFE5484D.toInt(), 0xFF3457D5.toInt(),
@@ -122,17 +143,27 @@ fun ReaderScreen(
     modifier: Modifier = Modifier,
     onManagePages: (Long) -> Unit = {},
     onOpenDocument: (Long) -> Unit = {},
+    // Switch the reader to another open tab (replaces the current reader instead of stacking).
+    onSwitchDocument: (Long) -> Unit = onOpenDocument,
     viewModel: ReaderViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     LaunchedEffect(documentId) { viewModel.onEvent(ReaderEvent.Open(documentId)) }
+    // Save the reading position whenever the app leaves the foreground (process may be killed later).
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { viewModel.persistPosition() }
 
     val listState = rememberLazyListState()
+    val reflowListState = rememberLazyListState()
     LaunchedEffect(listState) {
         snapshotFlow { listState.firstVisibleItemIndex }
             .collect { viewModel.onEvent(ReaderEvent.PageChanged(it)) }
+    }
+    LaunchedEffect(state.reflow) {
+        if (!state.reflow && state.pageCount > 0) {
+            listState.scrollToItem(state.currentPage.coerceIn(0, state.pageCount - 1))
+        }
     }
     LaunchedEffect(state.pendingScrollPage) {
         state.pendingScrollPage?.let { page ->
@@ -227,6 +258,19 @@ fun ReaderScreen(
                                 Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Contents")
                             }
                         }
+                        IconButton(
+                            onClick = { viewModel.onEvent(ReaderEvent.ToggleReflow) },
+                            modifier = Modifier.semantics {
+                                stateDescription = if (state.reflow) "On" else "Off"
+                            },
+                        ) {
+                            Icon(
+                                Icons.Filled.AutoStories,
+                                contentDescription = "Reading mode",
+                                tint = if (state.reflow) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
                         IconButton(onClick = { viewModel.onEvent(ReaderEvent.ToggleSearch) }) {
                             Icon(Icons.Filled.Search, contentDescription = "Search")
                         }
@@ -239,7 +283,11 @@ fun ReaderScreen(
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                             ReaderTheme.entries.forEach { theme ->
                                 DropdownMenuItem(
-                                    text = { Text(themeLabel(theme) + if (theme == state.theme) "  ✓" else "") },
+                                    text = { Text(themeLabel(theme)) },
+                                    trailingIcon = {
+                                        if (theme == state.theme) Icon(Icons.Filled.Check, contentDescription = null)
+                                    },
+                                    modifier = Modifier.semantics { selected = theme == state.theme },
                                     onClick = {
                                         viewModel.onEvent(ReaderEvent.SetTheme(theme))
                                         menuOpen = false
@@ -304,12 +352,38 @@ fun ReaderScreen(
                                 text = { Text("Print") },
                                 onClick = {
                                     menuOpen = false
-                                    if (state.uri.isNotBlank()) printPdf(context, state.uri, state.displayName)
+                                    // workingUri = unlocked copy for protected PDFs (the spooler can't decrypt).
+                                    val printUri = state.workingUri.ifBlank { state.uri }
+                                    if (printUri.isNotBlank()) printPdf(context, printUri, state.displayName)
                                 },
                             )
                         }
                     },
                 )
+                if (state.tabs.size > 1) {
+                    ReaderTabsRow(
+                        tabs = state.tabs,
+                        currentId = state.documentId,
+                        onSelect = { id ->
+                            viewModel.persistPosition()
+                            onSwitchDocument(id)
+                        },
+                        onClose = { id ->
+                            viewModel.onEvent(ReaderEvent.CloseTab(id))
+                            if (id == state.documentId) {
+                                val others = state.tabs.filter { it.documentId != id }
+                                val next = others.lastOrNull()
+                                if (next != null) onSwitchDocument(next.documentId) else onBack()
+                            }
+                        },
+                    )
+                }
+                if (state.reflow) {
+                    ReflowBar(
+                        scale = state.reflowScale,
+                        onScale = { viewModel.onEvent(ReaderEvent.SetReflowScale(it)) },
+                    )
+                }
                 if (state.searchActive) {
                     SearchBar(
                         query = state.searchQuery,
@@ -351,22 +425,38 @@ fun ReaderScreen(
         val bg = readerBackground(state.theme)
         Box(Modifier.fillMaxSize().padding(padding).background(bg)) {
             when {
-                state.isLoading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
+                state.isLoading -> CircularProgressIndicator(
+                    Modifier.align(Alignment.Center).semantics { contentDescription = "Opening document" },
+                )
                 state.error != null -> Text(
                     text = state.error ?: "Error",
                     color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(24.dp)
+                        .semantics { liveRegion = LiveRegionMode.Polite },
+                )
+                state.reflow -> ReflowContent(
+                    pages = state.reflowPages,
+                    loading = state.reflowLoading,
+                    textLayerMissing = state.textLayerMissing,
+                    theme = state.theme,
+                    scale = state.reflowScale,
+                    startPage = state.currentPage,
+                    listState = reflowListState,
+                    onPageChanged = { viewModel.onEvent(ReaderEvent.PageChanged(it)) },
                 )
                 else -> PageList(
                     pageCount = state.pageCount,
+                    theme = state.theme,
                     zoom = zoom,
                     annotating = state.annotating,
                     highlighter = state.highlighter,
                     noteMode = state.noteMode,
                     inkColor = Color(state.inkColorArgb),
                     annotationsByPage = state.annotationsByPage,
-                    onZoom = { factor ->
-                        zoom = (zoom * factor).coerceIn(1f, 5f)
+                    onZoomChange = { newZoom ->
+                        zoom = ZoomMath.clamp(newZoom)
                         viewModel.onEvent(ReaderEvent.ZoomChanged(zoom))
                     },
                     onStroke = { page, pts -> viewModel.saveStroke(page, pts) },
@@ -384,7 +474,7 @@ fun ReaderScreen(
                     contentPadding = PaddingValues(vertical = 8.dp),
                 )
             }
-            if (!state.isLoading && state.error == null && state.pageCount > 0) {
+            if (!state.isLoading && state.error == null && state.pageCount > 0 && !state.reflow) {
                 Text(
                     text = "${state.currentPage + 1} / ${state.pageCount}",
                     color = Color.White,
@@ -470,6 +560,7 @@ fun ReaderScreen(
 
     if (state.showPaywall) {
         PaywallDialog(
+            price = state.proPrice,
             onDismiss = { viewModel.onEvent(ReaderEvent.DismissPaywall) },
             onUpgrade = { (context as? Activity)?.let { viewModel.upgrade(it) } },
         )
@@ -579,7 +670,7 @@ private fun OpenPasswordDialog(error: String?, onSubmit: (String) -> Unit, onCan
 }
 
 @Composable
-private fun PaywallDialog(onDismiss: () -> Unit, onUpgrade: () -> Unit) {
+private fun PaywallDialog(price: String?, onDismiss: () -> Unit, onUpgrade: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Sheaf Pro") },
@@ -590,9 +681,17 @@ private fun PaywallDialog(onDismiss: () -> Unit, onUpgrade: () -> Unit) {
                 Text("•  OCR — make scans searchable")
                 Text("•  Reduce file size")
                 Text("•  Password protection")
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "One-time purchase. No subscription, no ads.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         },
-        confirmButton = { TextButton(onClick = onUpgrade) { Text("Upgrade") } },
+        confirmButton = {
+            TextButton(onClick = onUpgrade) { Text(if (price != null) "Upgrade · $price" else "Upgrade") }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Not now") } },
     )
 }
@@ -668,12 +767,16 @@ private fun InkToolbar(
     onColor: (Int) -> Unit,
     onClearPage: () -> Unit,
 ) {
+    // Scrolls horizontally: 4 tools + 6 colours + actions don't fit a 360dp phone in one row.
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        IconButton(onClick = { onTool(false) }) {
+        IconButton(onClick = { onTool(false) }, modifier = Modifier.toolState(!highlighter && !noteMode && !signatureMode)) {
             Icon(
                 Icons.Filled.Draw,
                 contentDescription = "Pen",
@@ -681,7 +784,7 @@ private fun InkToolbar(
                 else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        IconButton(onClick = { onTool(true) }) {
+        IconButton(onClick = { onTool(true) }, modifier = Modifier.toolState(highlighter && !noteMode && !signatureMode)) {
             Icon(
                 Icons.Filled.Brush,
                 contentDescription = "Highlighter",
@@ -689,7 +792,7 @@ private fun InkToolbar(
                 else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        IconButton(onClick = onNote) {
+        IconButton(onClick = onNote, modifier = Modifier.toolState(noteMode)) {
             Icon(
                 Icons.Filled.StickyNote2,
                 contentDescription = "Note",
@@ -697,7 +800,7 @@ private fun InkToolbar(
                 else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        IconButton(onClick = onSignature) {
+        IconButton(onClick = onSignature, modifier = Modifier.toolState(signatureMode)) {
             Icon(
                 Icons.Filled.Gesture,
                 contentDescription = "Signature",
@@ -710,8 +813,15 @@ private fun InkToolbar(
         }
         InkColors.forEach { argb ->
             val c = Color(argb)
+            val isCurrent = argb == selected
             Box(
                 Modifier
+                    .semantics {
+                        contentDescription = "${inkColorName(argb)} ink"
+                        role = Role.RadioButton
+                        this.selected = isCurrent
+                    }
+                    .minimumInteractiveComponentSize()
                     .size(26.dp)
                     .background(c, CircleShape)
                     .border(
@@ -723,7 +833,6 @@ private fun InkToolbar(
                     .clickable { onColor(argb) },
             )
         }
-        Spacer(Modifier.weight(1f))
         TextButton(onClick = onClearPage) { Text("Clear page") }
     }
 }
@@ -760,7 +869,18 @@ private fun SearchBar(
             resultCount == 0 -> ""
             else -> "${resultIndex + 1}/$resultCount"
         }
-        Text(label)
+        Text(
+            label,
+            modifier = Modifier.semantics {
+                liveRegion = LiveRegionMode.Polite
+                contentDescription = when {
+                    searching -> "Searching"
+                    resultCount == 0 && text.isNotBlank() -> "No results"
+                    resultCount == 0 -> ""
+                    else -> "Result ${resultIndex + 1} of $resultCount"
+                }
+            },
+        )
         IconButton(onClick = onPrev, enabled = resultCount > 0) {
             Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Previous result")
         }
@@ -773,7 +893,7 @@ private fun SearchBar(
 private fun shareDocument(context: android.content.Context, uri: String) {
     val send = Intent(Intent.ACTION_SEND).apply {
         type = "application/pdf"
-        putExtra(Intent.EXTRA_STREAM, Uri.parse(uri))
+        putExtra(Intent.EXTRA_STREAM, uri.toUri())
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     runCatching { context.startActivity(Intent.createChooser(send, "Share PDF")) }
@@ -782,13 +902,14 @@ private fun shareDocument(context: android.content.Context, uri: String) {
 @Composable
 private fun PageList(
     pageCount: Int,
+    theme: ReaderTheme,
     zoom: Float,
     annotating: Boolean,
     highlighter: Boolean,
     noteMode: Boolean,
     inkColor: Color,
     annotationsByPage: Map<Int, List<Annotation>>,
-    onZoom: (Float) -> Unit,
+    onZoomChange: (Float) -> Unit,
     onStroke: (Int, List<NormPoint>) -> Unit,
     onTapNote: (Int, NormPoint) -> Unit,
     onEditNote: (Annotation) -> Unit,
@@ -804,35 +925,87 @@ private fun PageList(
     contentPadding: PaddingValues,
 ) {
     val pages = remember(pageCount) { (0 until pageCount).toList() }
-    val listModifier = if (!annotating) {
-        Modifier.fillMaxSize().pointerInput(Unit) {
-            detectTransformGestures { _, _, gestureZoom, _ -> onZoom(gestureZoom) }
+    val pageFilter = remember(theme) { PageColors.pageFilter(theme) }
+    // Real layout zoom: pages are laid out zoom x wider than the viewport and the user pans
+    // horizontally, so text actually gets bigger (the old version only re-rendered sharper bitmaps).
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val density = LocalDensity.current
+        val viewportWidth = maxWidth
+        val viewportWidthPx = with(density) { viewportWidth.roundToPx() }.coerceAtLeast(1)
+        val hScroll = rememberScrollState()
+        val currentZoom by androidx.compose.runtime.rememberUpdatedState(zoom)
+        // Scroll corrections that keep the pinch focus point still; applied after the next layout.
+        var pendingX by remember { mutableStateOf<Float?>(null) }
+        var pendingY by remember { mutableFloatStateOf(0f) }
+        var zoomGeneration by remember { mutableIntStateOf(0) }
+
+        fun zoomAround(target: Float, focus: Offset) {
+            val newZoom = ZoomMath.clamp(target)
+            val factor = newZoom / currentZoom
+            if (factor == 1f) return
+            val baseX = pendingX ?: hScroll.value.toFloat()
+            pendingX = ZoomMath.focalScroll(baseX, focus.x, factor)
+            pendingY += (factor - 1f) * (listState.firstVisibleItemScrollOffset + focus.y)
+            onZoomChange(newZoom)
+            zoomGeneration++
         }
-    } else {
-        Modifier.fillMaxSize()
-    }
-    LazyColumn(state = listState, contentPadding = contentPadding, modifier = listModifier) {
-        items(pages, key = { it }) { index ->
-            PdfPageItem(
-                pageIndex = index,
-                zoom = zoom,
-                aspectRatio = aspectRatioOf(index),
-                annotating = annotating,
-                highlighter = highlighter,
-                noteMode = noteMode,
-                inkColor = inkColor,
-                savedStrokes = annotationsByPage[index].orEmpty(),
-                onStroke = { pts -> onStroke(index, pts) },
-                onTapNote = { pt -> onTapNote(index, pt) },
-                onEditNote = onEditNote,
-                signatureMode = signatureMode,
-                onStampSignature = { pt -> onStampSignature(index, pt) },
-                formMode = formMode,
-                formFields = formFieldsByPage[index].orEmpty(),
-                formValues = formValues,
-                onFormValue = onFormValue,
-                renderPage = renderPage,
-            )
+
+        LaunchedEffect(zoomGeneration) {
+            if (zoomGeneration == 0) return@LaunchedEffect
+            withFrameNanos { } // wait for the wider layout so the new scroll range exists
+            pendingX?.let { hScroll.scrollTo(it.roundToInt()) }
+            if (pendingY != 0f) listState.scrollBy(pendingY)
+            pendingX = null
+            pendingY = 0f
+        }
+
+        val gestures = if (annotating) {
+            Modifier
+        } else {
+            Modifier
+                .pinchToZoom(enabled = true) { change, centroid -> zoomAround(currentZoom * change, centroid) }
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onDoubleTap = { pos -> zoomAround(ZoomMath.doubleTapTarget(currentZoom), pos) },
+                    )
+                }
+        }
+        Box(
+            Modifier
+                .fillMaxSize()
+                .then(gestures)
+                .horizontalScroll(hScroll, enabled = zoom > ZoomMath.MIN_ZOOM && !annotating),
+        ) {
+            LazyColumn(
+                state = listState,
+                contentPadding = contentPadding,
+                modifier = Modifier.width(viewportWidth * zoom).fillMaxSize(),
+            ) {
+                items(pages, key = { it }) { index ->
+                    PdfPageItem(
+                        pageIndex = index,
+                        pageCount = pageCount,
+                        renderWidthPx = ZoomMath.renderWidth(viewportWidthPx, zoom),
+                        aspectRatio = aspectRatioOf(index),
+                        pageFilter = pageFilter,
+                        annotating = annotating,
+                        highlighter = highlighter,
+                        noteMode = noteMode,
+                        inkColor = inkColor,
+                        savedStrokes = annotationsByPage[index].orEmpty(),
+                        onStroke = { pts -> onStroke(index, pts) },
+                        onTapNote = { pt -> onTapNote(index, pt) },
+                        onEditNote = onEditNote,
+                        signatureMode = signatureMode,
+                        onStampSignature = { pt -> onStampSignature(index, pt) },
+                        formMode = formMode,
+                        formFields = formFieldsByPage[index].orEmpty(),
+                        formValues = formValues,
+                        onFormValue = onFormValue,
+                        renderPage = renderPage,
+                    )
+                }
+            }
         }
     }
 }
@@ -840,8 +1013,10 @@ private fun PageList(
 @Composable
 private fun PdfPageItem(
     pageIndex: Int,
-    zoom: Float,
+    pageCount: Int,
+    renderWidthPx: Int,
     aspectRatio: Float,
+    pageFilter: androidx.compose.ui.graphics.ColorFilter?,
     annotating: Boolean,
     highlighter: Boolean,
     noteMode: Boolean,
@@ -858,17 +1033,16 @@ private fun PdfPageItem(
     onFormValue: (String, String) -> Unit,
     renderPage: suspend (Int, Int, Int) -> android.graphics.Bitmap?,
 ) {
-    val density = LocalDensity.current
-    val screenWidthPx = with(density) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
-    val targetWidthPx = (screenWidthPx * zoom).roundToInt().coerceIn(1, 3000)
-    val targetHeightPx = (targetWidthPx * aspectRatio).roundToInt().coerceIn(1, 6000)
+    val targetHeightPx = (renderWidthPx * aspectRatio).roundToInt().coerceIn(1, ZoomMath.MAX_RENDER_WIDTH_PX * 3)
 
+    // Keeps showing the previous bitmap while a sharper one renders, so zooming never flashes blank.
     var bitmap by remember(pageIndex) { mutableStateOf<android.graphics.Bitmap?>(null) }
-    LaunchedEffect(pageIndex, targetWidthPx, targetHeightPx) {
-        bitmap = renderPage(pageIndex, targetWidthPx, targetHeightPx)
+    LaunchedEffect(pageIndex, renderWidthPx, targetHeightPx) {
+        renderPage(pageIndex, renderWidthPx, targetHeightPx)?.let { bitmap = it }
     }
 
     val live = remember(pageIndex) { mutableStateListOf<Offset>() }
+    val pageLabel = "Page ${pageIndex + 1} of $pageCount"
 
     Box(
         Modifier.fillMaxWidth().aspectRatio(1f / aspectRatio).padding(vertical = 6.dp),
@@ -878,12 +1052,13 @@ private fun PdfPageItem(
         if (bmp != null) {
             Image(
                 bitmap = bmp.asImageBitmap(),
-                contentDescription = "Page ${pageIndex + 1}",
+                contentDescription = pageLabel,
                 contentScale = ContentScale.FillWidth,
-                modifier = Modifier.fillMaxWidth(),
+                colorFilter = pageFilter,
+                modifier = Modifier.fillMaxSize(),
             )
         } else {
-            CircularProgressIndicator()
+            CircularProgressIndicator(Modifier.semantics { contentDescription = "Loading $pageLabel" })
         }
         Canvas(
             Modifier.matchParentSize().pointerInput(annotating, noteMode, signatureMode) {
@@ -945,12 +1120,13 @@ private fun PdfPageItem(
                 if (pt != null) {
                     Icon(
                         imageVector = Icons.Filled.StickyNote2,
-                        contentDescription = "Note",
+                        contentDescription = "Note: ${ann.note.orEmpty()}",
                         tint = Color(ann.colorArgb),
                         modifier = Modifier
                             .align(BiasAlignment(2f * pt.x - 1f, 2f * pt.y - 1f))
-                            .size(28.dp)
-                            .clickable { onEditNote(ann) },
+                            .minimumInteractiveComponentSize()
+                            .clickable(onClickLabel = "Edit note") { onEditNote(ann) }
+                            .size(28.dp),
                     )
                 }
             }
@@ -982,7 +1158,7 @@ private fun FormFieldOverlay(
                     Checkbox(
                         checked = checked,
                         onCheckedChange = { onValue(f.name, if (it) "Yes" else "Off") },
-                        modifier = Modifier.offset(x = x, y = y),
+                        modifier = Modifier.offset(x = x, y = y).semantics { contentDescription = f.name },
                     )
                 }
                 FormFieldType.Unsupported -> Unit
@@ -994,6 +1170,7 @@ private fun FormFieldOverlay(
                         textStyle = TextStyle(fontSize = 12.sp, color = Color(0xFF15171C)),
                         modifier = Modifier
                             .offset(x = x, y = y)
+                            .semantics { contentDescription = "Form field ${f.name}" }
                             .size(width = fw, height = fh)
                             .background(Color(0x223457D5))
                             .border(1.dp, Color(0xFF3457D5))
@@ -1063,9 +1240,43 @@ private fun themeLabel(theme: ReaderTheme): String = when (theme) {
     ReaderTheme.Sepia -> "Sepia"
 }
 
-private fun readerBackground(theme: ReaderTheme): Color = when (theme) {
-    ReaderTheme.Sepia -> Color(0xFFF4ECD8)
-    ReaderTheme.Light -> Color(0xFFFFFFFF)
-    ReaderTheme.Dark -> Color(0xFF121212)
-    ReaderTheme.System -> Color(0xFF15171C)
+private fun inkColorName(argb: Int): String = when (argb) {
+    0xFFE4713B.toInt() -> "Orange"
+    0xFFE5484D.toInt() -> "Red"
+    0xFF3457D5.toInt() -> "Blue"
+    0xFF2F9E44.toInt() -> "Green"
+    0xFFF2C037.toInt() -> "Yellow"
+    0xFF15171C.toInt() -> "Black"
+    else -> "Custom"
 }
+
+/** Text size controls for reading mode. */
+@Composable
+private fun ReflowBar(scale: Float, onScale: (Float) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            "Reading mode",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        IconButton(onClick = { onScale(scale - 0.1f) }, enabled = scale > 0.81f) {
+            Icon(Icons.Filled.TextDecrease, contentDescription = "Smaller text")
+        }
+        Text(
+            "${(scale * 100).roundToInt()}%",
+            style = MaterialTheme.typography.labelLarge,
+            modifier = Modifier.semantics { contentDescription = "Text size ${(scale * 100).roundToInt()} percent" },
+        )
+        IconButton(onClick = { onScale(scale + 0.1f) }, enabled = scale < 1.99f) {
+            Icon(Icons.Filled.TextIncrease, contentDescription = "Larger text")
+        }
+    }
+}
+
+private fun Modifier.toolState(active: Boolean): Modifier =
+    semantics { stateDescription = if (active) "Selected" else "Not selected" }

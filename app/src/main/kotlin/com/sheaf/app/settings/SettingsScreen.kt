@@ -2,7 +2,13 @@ package com.sheaf.app.settings
 
 import android.app.Activity
 
-import androidx.compose.foundation.clickable
+import android.widget.Toast
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -39,6 +45,14 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val message by viewModel.message.collectAsStateWithLifecycle()
+    val toastContext = LocalContext.current
+    LaunchedEffect(message) {
+        message?.let {
+            Toast.makeText(toastContext, it, Toast.LENGTH_LONG).show()
+            viewModel.consumeMessage()
+        }
+    }
     Scaffold(
         modifier = modifier,
         topBar = {
@@ -95,22 +109,29 @@ fun SettingsScreen(
             Text(
                 text = "Default reading theme",
                 style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
+                modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp).semantics { heading() },
             )
+            Column(Modifier.selectableGroup()) {
             listOf("System", "Light", "Dark", "Sepia").forEach { theme ->
+                // One selectable row per option so TalkBack reads "Sepia, radio button, selected".
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { viewModel.setDefaultReaderTheme(theme) }
+                        .selectable(
+                            selected = state.defaultReaderTheme == theme,
+                            onClick = { viewModel.setDefaultReaderTheme(theme) },
+                            role = Role.RadioButton,
+                        )
                         .padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     RadioButton(
                         selected = state.defaultReaderTheme == theme,
-                        onClick = { viewModel.setDefaultReaderTheme(theme) },
+                        onClick = null,
                     )
                     Text(theme, modifier = Modifier.padding(start = 8.dp))
                 }
+            }
             }
         }
     }

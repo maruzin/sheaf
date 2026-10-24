@@ -1,5 +1,8 @@
 package com.sheaf.feature.reader.compress
 
+import androidx.core.graphics.scale
+import androidx.core.net.toUri
+import com.sheaf.feature.reader.pdf.PdfBoxMemory
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
@@ -24,10 +27,11 @@ class PdfBoxCompressor @Inject constructor(
     override suspend fun compress(uri: String): String? = withContext(io) {
         ensureInit()
         runCatching {
-            val dir = File(context.filesDir, "compressed").apply { mkdirs() }
+            // Share-only output: cacheDir (served by the FileProvider), not permanent storage.
+            val dir = File(context.cacheDir, "compressed").apply { mkdirs() }
             val out = File(dir, "compressed_${System.currentTimeMillis()}.pdf")
-            context.contentResolver.openInputStream(Uri.parse(uri))?.use { input ->
-                PDDocument.load(input).use { doc ->
+            context.contentResolver.openInputStream(uri.toUri())?.use { input ->
+                PDDocument.load(input, PdfBoxMemory.setting()).use { doc ->
                     for (page in doc.pages) {
                         val res = page.resources ?: continue
                         val names = res.xObjectNames?.toList() ?: continue
@@ -43,7 +47,7 @@ class PdfBoxCompressor @Inject constructor(
                                     val scale = MAX_DIM.toFloat() / longest
                                     val nw = (bmp.width * scale).roundToInt().coerceAtLeast(1)
                                     val nh = (bmp.height * scale).roundToInt().coerceAtLeast(1)
-                                    val scaled = Bitmap.createScaledBitmap(bmp, nw, nh, true)
+                                    val scaled = bmp.scale(nw, nh, true)
                                     val newImage = JPEGFactory.createFromImage(doc, scaled, JPEG_QUALITY)
                                     res.put(name, newImage)
                                 }
@@ -53,7 +57,8 @@ class PdfBoxCompressor @Inject constructor(
                     doc.save(out)
                 }
             }
-            out.absolutePath
+            // Only report success if something was actually written (null stream = unreadable source).
+            out.takeIf { it.length() > 0 }?.absolutePath
         }.getOrNull()
     }
 

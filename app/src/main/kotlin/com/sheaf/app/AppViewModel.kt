@@ -1,5 +1,6 @@
 package com.sheaf.app
 
+import androidx.core.net.toUri
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -52,15 +53,26 @@ class AppViewModel @Inject constructor(
         viewModelScope.launch {
             val id = withContext(Dispatchers.IO) {
                 runCatching {
-                    val src = Uri.parse(uriString)
+                    val src = uriString.toUri()
                     val name = queryDisplayName(src)
+                    // Opening the same file again (same name + size) reuses the library entry
+                    // instead of stacking duplicate copies.
+                    val size = querySize(src)
+                    if (size > 0) {
+                        repository.findByNameAndSize(name, size)?.let { existing ->
+                            if (documentFileExists(existing.uri)) return@runCatching existing.id
+                        }
+                    }
                     val dir = File(context.filesDir, "opened").apply { mkdirs() }
                     val out = File(dir, "open_${System.currentTimeMillis()}.pdf")
                     val copied = context.contentResolver.openInputStream(src)?.use { input ->
                         out.outputStream().use { output -> input.copyTo(output) }
                         true
                     } ?: false
-                    if (!copied) return@runCatching null
+                    if (!copied || out.length() == 0L) {
+                        out.delete()
+                        return@runCatching null
+                    }
                     val fileUri = Uri.fromFile(out).toString()
                     val pageCount = renderFactory.open(fileUri).let { s ->
                         try {
@@ -84,6 +96,23 @@ class AppViewModel @Inject constructor(
             }
             _pendingOpenDoc.value = id
         }
+    }
+
+    private fun querySize(uri: Uri): Long {
+        if (uri.scheme == "file") return uri.path?.let { File(it).length() } ?: -1L
+        var size = -1L
+        runCatching {
+            context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { c ->
+                val idx = c.getColumnIndex(OpenableColumns.SIZE)
+                if (c.moveToFirst() && idx >= 0 && !c.isNull(idx)) size = c.getLong(idx)
+            }
+        }
+        return size
+    }
+
+    private fun documentFileExists(uri: String): Boolean {
+        val parsed = uri.toUri()
+        return if (parsed.scheme == "file") parsed.path?.let { File(it).exists() } == true else true
     }
 
     private fun queryDisplayName(uri: Uri): String {

@@ -11,12 +11,22 @@ data class ReaderUiState(
     val isLoading: Boolean = true,
     val documentId: Long? = null,
     val uri: String = "",
+    // The uri PdfBox/print work on: equals [uri], or the unlocked temp copy of a protected PDF.
+    val workingUri: String = "",
     val displayName: String = "",
     val pageCount: Int = 0,
     val currentPage: Int = 0,
     val zoom: Float = 1f,
     val theme: ReaderTheme = ReaderTheme.System,
+    // Reading mode (reflow): page text re-laid out as paragraphs at a comfortable size.
     val reflow: Boolean = false,
+    val reflowLoading: Boolean = false,
+    val reflowPages: List<List<String>> = emptyList(),
+    val reflowScale: Float = 1f,
+    // True when the document has no text layer (a scan): search/reflow suggest OCR instead.
+    val textLayerMissing: Boolean = false,
+    // Open documents shown as tabs (most recent last).
+    val tabs: List<ReaderTab> = emptyList(),
     val outline: List<OutlineEntry> = emptyList(),
     val outlineVisible: Boolean = false,
     // Search
@@ -56,6 +66,7 @@ data class ReaderUiState(
     // Freemium
     val isPro: Boolean = false,
     val showPaywall: Boolean = false,
+    val proPrice: String? = null,
     val billingMessage: String? = null,
     // Encrypted-document open flow
     val needsPassword: Boolean = false,
@@ -66,6 +77,8 @@ data class ReaderUiState(
 )
 
 enum class ReaderTheme { System, Light, Dark, Sepia }
+
+data class ReaderTab(val documentId: Long, val title: String)
 
 sealed interface ReaderEvent {
     data class Open(val documentId: Long) : ReaderEvent
@@ -102,4 +115,7 @@ sealed interface ReaderEvent {
     data object CancelOpenPassword : ReaderEvent
     data object ConsumeScroll : ReaderEvent
     data class JumpTo(val page: Int) : ReaderEvent
+    data object ToggleReflow : ReaderEvent
+    data class SetReflowScale(val scale: Float) : ReaderEvent
+    data class CloseTab(val documentId: Long) : ReaderEvent
 }

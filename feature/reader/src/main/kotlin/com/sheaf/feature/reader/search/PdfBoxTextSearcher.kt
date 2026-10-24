@@ -1,60 +1,43 @@
 package com.sheaf.feature.reader.search
 
+import androidx.core.net.toUri
 import android.content.Context
 import android.net.Uri
-import com.sheaf.core.domain.model.SearchHit
+import com.sheaf.feature.reader.pdf.PdfBoxMemory
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
-import kotlin.math.max
-import kotlin.math.min
 
 /**
- * Text search using PdfBox-Android. Extracts text page-by-page and reports the pages that contain
- * the query, with a short surrounding snippet. Runs on [io]. Heavy for very large PDFs — acceptable
- * for M1; can be pre-indexed later.
+ * Page text extraction using PdfBox-Android, run on [io]. The document is parsed once per call with
+ * a disk-backed memory policy; callers cache the returned list (see ReaderViewModel).
  */
 class PdfBoxTextSearcher @Inject constructor(
     @ApplicationContext private val context: Context,
     private val io: CoroutineDispatcher,
 ) : PdfTextSearcher {
 
-    override suspend fun search(uri: String, query: String): List<SearchHit> = withContext(io) {
-        val needle = query.trim()
-        if (needle.isEmpty()) return@withContext emptyList()
+    override suspend fun pageTexts(uri: String): List<String> = withContext(io) {
         ensureInit()
-        val hits = ArrayList<SearchHit>()
-        context.contentResolver.openInputStream(Uri.parse(uri))?.use { input ->
-            PDDocument.load(input).use { doc ->
-                val stripper = PDFTextStripper()
-                val total = doc.numberOfPages
-                for (page in 1..total) {
+        val pages = ArrayList<String>()
+        context.contentResolver.openInputStream(uri.toUri())?.use { input ->
+            PDDocument.load(input, PdfBoxMemory.setting()).use { doc ->
+                val stripper = PDFTextStripper().apply { sortByPosition = true }
+                for (page in 1..doc.numberOfPages) {
+                    ensureActive() // stop promptly if the reader closes mid-extraction
                     stripper.startPage = page
                     stripper.endPage = page
-                    val text = runCatching { stripper.getText(doc) }.getOrDefault("")
-                    val idx = text.indexOf(needle, ignoreCase = true)
-                    if (idx >= 0) {
-                        hits += SearchHit(
-                            pageIndex = page - 1,
-                            snippet = snippetAround(text, idx, needle.length),
-                            boundsOnPage = emptyList(),
-                        )
-                    }
+                    pages += runCatching { stripper.getText(doc) }.getOrDefault("")
                 }
             }
         }
-        hits
-    }
-
-    private fun snippetAround(text: String, index: Int, length: Int): String {
-        val start = max(0, index - 30)
-        val end = min(text.length, index + length + 30)
-        return text.substring(start, end).replace('\n', ' ').trim()
+        pages
     }
 
     private fun ensureInit() {

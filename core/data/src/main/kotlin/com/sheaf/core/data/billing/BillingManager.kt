@@ -81,6 +81,20 @@ class BillingManager @Inject constructor(
         return if (result.responseCode == BillingClient.BillingResponseCode.OK) null else result.debugMessage
     }
 
+    /** Localised price of Sheaf Pro from Play (e.g. "€4.99"), or null if unavailable. */
+    suspend fun proPrice(): String? {
+        ensureConnected()
+        val product = QueryProductDetailsParams.Product.newBuilder()
+            .setProductId(PRO_ID)
+            .setProductType(BillingClient.ProductType.INAPP)
+            .build()
+        val params = QueryProductDetailsParams.newBuilder().setProductList(listOf(product)).build()
+        return runCatching {
+            client.queryProductDetails(params).productDetailsList?.firstOrNull()
+                ?.oneTimePurchaseOfferDetails?.formattedPrice
+        }.getOrNull()
+    }
+
     suspend fun restore() {
         ensureConnected()
         val params = QueryPurchasesParams.newBuilder()

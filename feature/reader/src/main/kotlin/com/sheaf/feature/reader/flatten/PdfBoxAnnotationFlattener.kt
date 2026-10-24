@@ -1,5 +1,7 @@
 package com.sheaf.feature.reader.flatten
 
+import androidx.core.net.toUri
+import com.sheaf.feature.reader.pdf.PdfBoxMemory
 import android.content.Context
 import android.net.Uri
 import com.sheaf.core.domain.model.Annotation
@@ -36,10 +38,11 @@ class PdfBoxAnnotationFlattener @Inject constructor(
         if (annotationsByPage.isEmpty()) return@withContext null
         ensureInit()
         runCatching {
-            val dir = File(context.filesDir, "signed").apply { mkdirs() }
+            // Share-only output: cacheDir (served by the FileProvider).
+            val dir = File(context.cacheDir, "signed").apply { mkdirs() }
             val out = File(dir, "signed_${System.currentTimeMillis()}.pdf")
-            context.contentResolver.openInputStream(Uri.parse(uri))?.use { input ->
-                PDDocument.load(input).use { doc ->
+            context.contentResolver.openInputStream(uri.toUri())?.use { input ->
+                PDDocument.load(input, PdfBoxMemory.setting()).use { doc ->
                     val pages = doc.pages.toList()
                     annotationsByPage.forEach { (pageIndex, list) ->
                         val page = pages.getOrNull(pageIndex) ?: return@forEach
@@ -93,7 +96,8 @@ class PdfBoxAnnotationFlattener @Inject constructor(
                     doc.save(out)
                 }
             }
-            out.absolutePath
+            // Only report success if something was actually written (null stream = unreadable source).
+            out.takeIf { it.length() > 0 }?.absolutePath
         }.getOrNull()
     }
 

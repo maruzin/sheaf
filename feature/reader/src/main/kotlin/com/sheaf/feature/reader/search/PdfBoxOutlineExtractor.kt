@@ -1,5 +1,7 @@
 package com.sheaf.feature.reader.search
 
+import androidx.core.net.toUri
+import com.sheaf.feature.reader.pdf.PdfBoxMemory
 import android.content.Context
 import android.net.Uri
 import com.sheaf.core.domain.model.OutlineEntry
@@ -23,8 +25,8 @@ class PdfBoxOutlineExtractor @Inject constructor(
         ensureInit()
         val entries = ArrayList<OutlineEntry>()
         runCatching {
-            context.contentResolver.openInputStream(Uri.parse(uri))?.use { input ->
-                PDDocument.load(input).use { doc ->
+            context.contentResolver.openInputStream(uri.toUri())?.use { input ->
+                PDDocument.load(input, PdfBoxMemory.setting()).use { doc ->
                     val root = doc.documentCatalog?.documentOutline ?: return@use
                     collect(root, 0, doc, entries)
                 }

@@ -5,6 +5,10 @@ plugins {
 android {
     namespace = "com.sheaf.core.data"
 }
+// Export Room schemas so every future version bump ships a tested Migration (no destructive resets).
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
 dependencies {
     implementation(project(":core:domain"))
     implementation(libs.room.runtime)

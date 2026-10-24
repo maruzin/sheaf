@@ -22,6 +22,12 @@ interface DocumentDao {
     @Query("SELECT * FROM documents WHERE uri = :uri LIMIT 1")
     suspend fun byUri(uri: String): DocumentEntity?
 
+    @Query("SELECT * FROM documents WHERE displayName = :name AND sizeBytes = :size LIMIT 1")
+    suspend fun byNameAndSize(name: String, size: Long): DocumentEntity?
+
+    @Query("UPDATE documents SET lastOpenedAt = :now WHERE id = :id")
+    suspend fun touch(id: Long, now: Long)
+
     @Query("UPDATE documents SET isBookmarked = :bookmarked WHERE id = :id")
     suspend fun setBookmarked(id: Long, bookmarked: Boolean)
 

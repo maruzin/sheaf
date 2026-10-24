@@ -4,6 +4,63 @@ Running engineering log. Newest first. Every non-obvious decision gets one line 
 
 ---
 
+## Top-5% pass (2026-10-24): features, bugs, a11y, perf, strict lint, tests
+**New**
+- **Real zoom:** pages lay out zoom x wider with horizontal pan. Pinch runs on the Initial pointer
+  pass (it used to lose to the list scroll). Double-tap toggles 1x / 2.5x. Renders are snapped to 25%
+  steps and capped at 2048 px (`ZoomMath`).
+- **Reading mode (reflow):** page text → paragraphs (hyphen repair, wrapped-line joins), 80–200% text
+  size, themed, page headers. Scans show an "use OCR" hint (`TextSearch.paragraphs`, `ReflowContent`).
+- **Text index:** page text is extracted once per document and shared by search and reflow
+  (`PdfTextSearcher.pageTexts`). Search now matches phrases across line breaks.
+- **Night/Sepia themes recolour the page bitmap** (ColorMatrix), not just the background. "System"
+  follows light/dark.
+- **Tabs:** open documents persist (DataStore, max 8) and show as a chip row when more than one is
+  open. Switching replaces the reader on the back stack (`OpenTabs`, `ReaderTabsRow`).
+- **Tablet two-pane** at ≥840dp: library + reader side by side, one ViewModel per document.
+- **Library:** remove from library (cascades annotations, deletes Sheaf-owned files, releases SAF
+  grants), import errors in a snackbar, busy bar, byte-bounded thumbnail LruCache, readable scan
+  names, "Open with" de-duplication (name + size).
+- **Paywall** shows the real Play price. Settings purchase/restore give feedback.
+- **TalkBack:** "Page N of M", headings, tool on/off states, ink colours as radio buttons, 48dp
+  note targets, form field labels, live search result count, selectable theme radios, tab close
+  action, per-page action labels in Manage pages.
+- **Perf:** `:benchmark` module (cold-start macrobenchmark + Baseline Profile generator),
+  profileinstaller in the app, PdfBox loads with a 48 MB RAM cap and spills to disk.
+- **Strict lint:** `abortOnError` + `warningsAsErrors` on every module. Only version nags are off, and
+  third-party-jar findings are scoped in `lint.xml`. 0 issues.
+
+**Bugs fixed**
+- Reading position never saved: it was written from `onCleared()` on the already-cancelled
+  `viewModelScope`. Now it's written on ON_STOP and in onCleared through a process-level scope.
+- Rotation reloaded the document and jumped back to the old saved page. `open()` now keeps the live
+  session.
+- The "Default reading theme" setting did nothing. The reader now applies it.
+- OCR / compress / protect / form-save / print failed silently on password-protected PDFs (they read
+  the encrypted original). They now use the unlocked working copy.
+- Unlocked (decrypted) copies piled up in filesDir. They now go to cacheDir, are deleted in onCleared,
+  and are purged on app start.
+- Every PdfBox writer returned a path even when the source couldn't be read (phantom files shared or
+  added to the library). They now return null.
+- Print copied the file on the main thread (ANR risk). It now copies on a worker thread and
+  honours cancel.
+- `fallbackToDestructiveMigration` would wipe the library on any schema bump. Schemas are now
+  exported (`core/data/schemas`) and only a downgrade may reset.
+- ViewModel fields declared after `init {}` could NPE when a collector emitted immediately. Found by
+  the new tests.
+- Ink toolbar and Manage-pages buttons overflowed and were clipped on phones. Onboarding showed black
+  text in dark theme (earlier pass).
+
+**Tests:** 38 JVM tests (was 6), including Robolectric tests that run the real PdfBox engine
+(text, outline, AES round-trip, wrong-password cleanup, unreadable-source handling) and ViewModel
+tests for each bug above. `app/src/androidTest` has end-to-end UI tests (open, search, reflow,
+theme, rotation, password, tabs, remove). CI `device-tests.yml` runs them on API 35 + 29 emulators
+and runs the startup benchmark and Baseline Profile generation.
+
+**Decision: no PDFium swap.** `android.graphics.pdf.PdfRenderer` already runs PDFium inside the
+platform. The gaps it left (text, outline, passwords) are now covered by PdfBox. Swapping engines
+would add native-crash risk that can't be verified without devices, for little gain.
+
 ## Play compliance pass (2026-10-24) — v1.0.1 (versionCode 3)
 Checked against Play's live requirements and verified with real local builds (assembleDebug,
 bundleRelease with R8, unit tests, lintRelease; JDK 21, Android SDK 36).

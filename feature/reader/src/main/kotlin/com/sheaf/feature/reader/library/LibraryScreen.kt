@@ -1,5 +1,19 @@
 package com.sheaf.feature.reader.library
 
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
@@ -65,8 +79,8 @@ import java.io.File
 @Composable
 fun LibraryScreen(
     onOpenDocument: (Long) -> Unit,
-    onOpenSettings: () -> Unit = {},
     modifier: Modifier = Modifier,
+    onOpenSettings: () -> Unit = {},
     viewModel: LibraryViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -131,8 +145,18 @@ fun LibraryScreen(
         }
     }
 
+    val snackbar = remember { SnackbarHostState() }
+    LaunchedEffect(state.error) {
+        state.error?.let {
+            snackbar.showSnackbar(it)
+            viewModel.consumeError()
+        }
+    }
+    var pendingRemove by remember { mutableStateOf<Document?>(null) }
+
     Scaffold(
         modifier = modifier,
+        snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
                 title = { Text("Sheaf") },
@@ -154,6 +178,14 @@ fun LibraryScreen(
             )
         },
     ) { padding ->
+        if (state.isBusy) {
+            LinearProgressIndicator(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(padding)
+                    .semantics { contentDescription = "Opening document" },
+            )
+        }
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 88.dp),
@@ -161,7 +193,13 @@ fun LibraryScreen(
             if (state.bookmarked.isNotEmpty()) {
                 item { SectionHeader("Bookmarked") }
                 items(state.bookmarked, key = { "b" + it.id }) { doc ->
-                    DocumentRow(doc, onOpen = onOpenDocument, onBookmark = viewModel::toggleBookmark, loadThumb = viewModel::thumbnail)
+                    DocumentRow(
+                        doc,
+                        onOpen = onOpenDocument,
+                        onBookmark = viewModel::toggleBookmark,
+                        onRemove = { pendingRemove = it },
+                        loadThumb = viewModel::thumbnail,
+                    )
                 }
             }
             item { SectionHeader("Recent") }
@@ -169,10 +207,36 @@ fun LibraryScreen(
                 item { EmptyState() }
             } else {
                 items(state.recents, key = { "r" + it.id }) { doc ->
-                    DocumentRow(doc, onOpen = onOpenDocument, onBookmark = viewModel::toggleBookmark, loadThumb = viewModel::thumbnail)
+                    DocumentRow(
+                        doc,
+                        onOpen = onOpenDocument,
+                        onBookmark = viewModel::toggleBookmark,
+                        onRemove = { pendingRemove = it },
+                        loadThumb = viewModel::thumbnail,
+                    )
                 }
             }
         }
+    }
+
+    pendingRemove?.let { doc ->
+        AlertDialog(
+            onDismissRequest = { pendingRemove = null },
+            title = { Text("Remove from library?") },
+            text = {
+                Text(
+                    "\"${doc.displayName}\" and its annotations will be removed from Sheaf. " +
+                        "Files stored in other apps are not deleted.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.remove(doc)
+                    pendingRemove = null
+                }) { Text("Remove") }
+            },
+            dismissButton = { TextButton(onClick = { pendingRemove = null }) { Text("Cancel") } },
+        )
     }
 }
 
@@ -181,7 +245,7 @@ private fun SectionHeader(text: String) {
     Text(
         text = text,
         style = MaterialTheme.typography.titleSmall,
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).semantics { heading() },
     )
 }
 
@@ -207,8 +271,10 @@ private fun DocumentRow(
     doc: Document,
     onOpen: (Long) -> Unit,
     onBookmark: (Document) -> Unit,
+    onRemove: (Document) -> Unit,
     loadThumb: suspend (String, Int) -> Bitmap?,
 ) {
+    var menuOpen by remember { mutableStateOf(false) }
     var thumb by remember(doc.uri) { mutableStateOf<Bitmap?>(null) }
     LaunchedEffect(doc.uri) { thumb = loadThumb(doc.uri, 160) }
     ListItem(
@@ -239,14 +305,37 @@ private fun DocumentRow(
             Text("${doc.pageCount} pages · ${formatSize(doc.sizeBytes)}")
         },
         trailingContent = {
-            IconButton(onClick = { onBookmark(doc) }) {
-                Icon(
-                    imageVector = if (doc.isBookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
-                    contentDescription = if (doc.isBookmarked) "Remove bookmark" else "Add bookmark",
-                )
+            Row {
+                IconButton(onClick = { onBookmark(doc) }) {
+                    Icon(
+                        imageVector = if (doc.isBookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
+                        contentDescription = if (doc.isBookmarked) "Remove bookmark" else "Add bookmark",
+                    )
+                }
+                Box {
+                    IconButton(onClick = { menuOpen = true }) {
+                        Icon(Icons.Filled.MoreVert, contentDescription = "More options for ${doc.displayName}")
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Remove from library") },
+                            leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
+                            onClick = {
+                                menuOpen = false
+                                onRemove(doc)
+                            },
+                        )
+                    }
+                }
             }
         },
-        modifier = Modifier.clickable { onOpen(doc.id) },
+        modifier = Modifier
+            .clickable(onClickLabel = "Open") { onOpen(doc.id) }
+            .semantics {
+                customActions = listOf(
+                    CustomAccessibilityAction("Remove from library") { onRemove(doc); true },
+                )
+            },
     )
 }
 
@@ -258,7 +347,8 @@ private fun importScannedPdf(context: android.content.Context, pdfUri: Uri): Tri
         context.contentResolver.openInputStream(pdfUri)?.use { input ->
             outFile.outputStream().use { output -> input.copyTo(output) }
         }
-        Triple(Uri.fromFile(outFile).toString(), "Scan ${outFile.name}", outFile.length())
+        val stamp = java.text.SimpleDateFormat("yyyy-MM-dd HH.mm", java.util.Locale.getDefault()).format(java.util.Date())
+        Triple(Uri.fromFile(outFile).toString(), "Scan $stamp.pdf", outFile.length())
     }.getOrNull()
 
 private fun queryNameAndSize(context: android.content.Context, uri: Uri): Pair<String, Long> {

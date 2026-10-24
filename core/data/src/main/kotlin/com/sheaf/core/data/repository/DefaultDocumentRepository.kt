@@ -1,5 +1,6 @@
 package com.sheaf.core.data.repository
 
+import com.sheaf.core.data.db.AnnotationDao
 import com.sheaf.core.data.db.DocumentDao
 import com.sheaf.core.data.db.DocumentEntity
 import com.sheaf.core.domain.model.Document
@@ -11,6 +12,7 @@ import javax.inject.Inject
 
 class DefaultDocumentRepository @Inject constructor(
     private val dao: DocumentDao,
+    private val annotationDao: AnnotationDao,
 ) : DocumentRepository {
 
     override fun observeRecents(limit: Int): Flow<List<Document>> =
@@ -38,7 +40,16 @@ class DefaultDocumentRepository @Inject constructor(
             ReadingPosition(e.id, page, e.posZoom ?: 1f, e.posOffsetX ?: 0f, e.posOffsetY ?: 0f)
         }
 
-    override suspend fun delete(documentId: Long) = dao.delete(documentId)
+    override suspend fun findByNameAndSize(displayName: String, sizeBytes: Long): Document? =
+        dao.byNameAndSize(displayName, sizeBytes)?.toDomain()
+
+    override suspend fun markOpened(documentId: Long) = dao.touch(documentId, System.currentTimeMillis())
+
+    override suspend fun delete(documentId: Long) {
+        // Annotations reference documents by id only (no FK), so remove them explicitly.
+        annotationDao.deleteForDocument(documentId)
+        dao.delete(documentId)
+    }
 }
 
 private fun DocumentEntity.toDomain() = Document(
