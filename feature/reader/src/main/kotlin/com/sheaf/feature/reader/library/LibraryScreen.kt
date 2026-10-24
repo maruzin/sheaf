@@ -175,6 +175,9 @@ fun LibraryScreen(
                 text = { Text("Open PDF") },
                 icon = { Icon(Icons.Filled.Add, contentDescription = null) },
                 onClick = { picker.launch(arrayOf("application/pdf")) },
+                // M3's extended FAB clears its text from the accessibility tree, which left TalkBack
+                // announcing an unlabeled "Button" (found by the device tests). Label it explicitly.
+                modifier = Modifier.semantics { contentDescription = "Open PDF" },
             )
         },
     ) { padding ->

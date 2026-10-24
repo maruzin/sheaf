@@ -11,7 +11,7 @@ private const val TIMEOUT_MS = 5_000L
 internal fun MacrobenchmarkScope.reachLibrary() {
     device.wait(Until.hasObject(By.text("Get started")), 1_500)
     device.findObject(By.text("Get started"))?.click()
-    device.wait(Until.hasObject(By.text("Open PDF")), TIMEOUT_MS)
+    device.wait(Until.hasObject(By.desc("Open PDF")), TIMEOUT_MS)
 }
 
 /** Scrolls the library list if it has content (fresh installs show the empty state). */

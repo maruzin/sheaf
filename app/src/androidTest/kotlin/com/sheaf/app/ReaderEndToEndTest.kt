@@ -7,6 +7,7 @@ import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -51,7 +52,7 @@ class ReaderEndToEndTest {
         // After Back we land on onboarding (fresh install) or the library: wait for either.
         compose.waitUntil(timeout) {
             compose.onAllNodesWithText("Get started").fetchSemanticsNodes().isNotEmpty() ||
-                compose.onAllNodesWithText("Open PDF").fetchSemanticsNodes().isNotEmpty()
+                compose.onAllNodesWithContentDescription("Open PDF").fetchSemanticsNodes().isNotEmpty()
         }
         if (compose.onAllNodesWithText("Get started").fetchSemanticsNodes().isNotEmpty()) {
             compose.onNodeWithText("Get started").performClick()
@@ -145,7 +146,7 @@ class ReaderEndToEndTest {
             waitForDescription("Page 1 of 1")
             compose.onNodeWithContentDescription("Back").performClick()
             skipOnboardingIfShown()
-            waitForText("Open PDF")
+            waitForDescription("Open PDF")
             compose.onAllNodesWithText(pdf.name).fetchSemanticsNodes().let { check(it.isNotEmpty()) }
             compose.onNodeWithContentDescription("More options for ${pdf.name}", useUnmergedTree = true)
                 .performClick()
