@@ -225,8 +225,13 @@ fun LibraryScreen(
             title = { Text("Remove from library?") },
             text = {
                 Text(
-                    "\"${doc.displayName}\" and its annotations will be removed from Sheaf. " +
-                        "Files stored in other apps are not deleted.",
+                    if (doc.uri.startsWith("file:")) {
+                        "\"${doc.displayName}\" is stored only in Sheaf (a scan, OCR result, edited " +
+                            "copy or opened file). It will be permanently deleted with its annotations."
+                    } else {
+                        "\"${doc.displayName}\" and its annotations will be removed from Sheaf. " +
+                            "The original file in its app is not deleted."
+                    },
                 )
             },
             confirmButton = {
@@ -302,7 +307,8 @@ private fun DocumentRow(
             Text(doc.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis)
         },
         supportingContent = {
-            Text("${doc.pageCount} pages · ${formatSize(doc.sizeBytes)}")
+            val pages = if (doc.pageCount > 0) "${doc.pageCount} pages" else "Password protected"
+            Text("$pages · ${formatSize(doc.sizeBytes)}")
         },
         trailingContent = {
             Row {

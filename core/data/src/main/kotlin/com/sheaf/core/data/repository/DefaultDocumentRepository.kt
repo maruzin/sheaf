@@ -43,6 +43,8 @@ class DefaultDocumentRepository @Inject constructor(
     override suspend fun findByNameAndSize(displayName: String, sizeBytes: Long): Document? =
         dao.byNameAndSize(displayName, sizeBytes)?.toDomain()
 
+    override suspend fun setPageCount(documentId: Long, pageCount: Int) = dao.setPageCount(documentId, pageCount)
+
     override suspend fun markOpened(documentId: Long) = dao.touch(documentId, System.currentTimeMillis())
 
     override suspend fun delete(documentId: Long) {

@@ -218,6 +218,69 @@ class ReaderViewModelTest {
     }
 
     @Test
+    fun `reopening scrolls back to the saved page`() = runTest {
+        repository.positions[1] = ReadingPosition(1, 2, 1.5f, 0f, 0f)
+        val vm = viewModel()
+        vm.onEvent(ReaderEvent.Open(1))
+        assertEquals(2, vm.state.value.currentPage)
+        assertEquals(2, vm.state.value.pendingScrollPage)
+        assertEquals(1.5f, vm.state.value.zoom)
+    }
+
+    @Test
+    fun `a saved page beyond the document is ignored`() = runTest {
+        repository.positions[1] = ReadingPosition(1, 99, 1f, 0f, 0f)
+        val vm = viewModel()
+        vm.onEvent(ReaderEvent.Open(1))
+        assertEquals(0, vm.state.value.currentPage)
+        assertNull(vm.state.value.pendingScrollPage)
+    }
+
+    @Test
+    fun `cancelling a password prompt never overwrites the saved position`() = runTest {
+        repository.positions[2] = ReadingPosition(2, 7, 1f, 0f, 0f)
+        renderFactory.protectedUris += protectedDoc.uri
+        val store = ViewModelStore()
+        val vm = viewModel()
+        store.put("reader", vm)
+        vm.onEvent(ReaderEvent.Open(2))
+        assertTrue(vm.state.value.needsPassword)
+        vm.onEvent(ReaderEvent.CancelOpenPassword)
+        vm.persistPosition()
+        store.clear()
+        Thread.sleep(200)
+        assertEquals(7, repository.positions[2]?.pageIndex)
+    }
+
+    @Test
+    fun `a protected document imported with 0 pages gets its page count after unlocking`() = runTest {
+        val unlocked = tmp.newFile("unlocked.pdf").apply { writeText("%PDF") }
+        repository.upsert(protectedDoc.copy(pageCount = 0))
+        renderFactory.protectedUris += protectedDoc.uri
+        coEvery { security.decrypt(protectedDoc.uri, "secret") } returns unlocked.absolutePath
+        val vm = viewModel()
+        vm.onEvent(ReaderEvent.Open(2))
+        vm.onEvent(ReaderEvent.SubmitOpenPassword("secret"))
+        assertEquals(1, repository.document(2)?.pageCount)
+    }
+
+    @Test
+    fun `release frees the session and a later open reloads`() = runTest {
+        val vm = viewModel()
+        vm.onEvent(ReaderEvent.Open(1))
+        vm.release()
+        vm.onEvent(ReaderEvent.Open(1))
+        assertEquals(2, renderFactory.opens)
+    }
+
+    @Test
+    fun `import counts pages and imports protected files with 0`() = runTest {
+        assertEquals(3, com.sheaf.feature.reader.library.countPages(renderFactory, "content://docs/a.pdf"))
+        renderFactory.protectedUris += "content://docs/locked.pdf"
+        assertEquals(0, com.sheaf.feature.reader.library.countPages(renderFactory, "content://docs/locked.pdf"))
+    }
+
+    @Test
     fun `unreadable document shows an error`() = runTest {
         val vm = viewModel()
         vm.onEvent(ReaderEvent.Open(42))
@@ -241,6 +304,9 @@ private class FakeDocumentRepository(docs: List<Document>) : DocumentRepository 
     override suspend fun findByNameAndSize(displayName: String, sizeBytes: Long) =
         byId.values.firstOrNull { it.displayName == displayName && it.sizeBytes == sizeBytes }
     override suspend fun markOpened(documentId: Long) { opened += documentId }
+    override suspend fun setPageCount(documentId: Long, pageCount: Int) {
+        byId[documentId]?.let { byId[documentId] = it.copy(pageCount = pageCount) }
+    }
     override suspend fun delete(documentId: Long) { byId.remove(documentId) }
 }
 

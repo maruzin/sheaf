@@ -1,6 +1,7 @@
 package com.sheaf.feature.reader
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ZoomMathTest {
@@ -34,5 +35,15 @@ class ZoomMathTest {
         assertEquals(ZoomMath.DOUBLE_TAP_ZOOM, ZoomMath.doubleTapTarget(1f))
         assertEquals(1f, ZoomMath.doubleTapTarget(2.5f))
         assertEquals(1f, ZoomMath.doubleTapTarget(4f))
+    }
+
+    @Test
+    fun `render size keeps proportions when a very tall page hits the height cap`() {
+        // A4 at 1080 wide: no cap.
+        assertEquals(1080 to 1527, ZoomMath.renderSize(1080, 1.414f))
+        // A 10:1 receipt: width shrinks so height fits the cap and the ratio is preserved.
+        val (w, h) = ZoomMath.renderSize(2048, 10f)
+        assertTrue(h <= ZoomMath.MAX_RENDER_HEIGHT_PX && h > ZoomMath.MAX_RENDER_HEIGHT_PX - 20)
+        assertEquals(10f, h.toFloat() / w, 0.05f)
     }
 }

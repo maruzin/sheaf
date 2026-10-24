@@ -46,7 +46,11 @@ class ReaderEndToEndTest {
 
     /** Opening via "Open with" on a fresh install stacks the reader over onboarding. */
     private fun skipOnboardingIfShown() {
-        compose.waitForIdle()
+        // After Back we land on onboarding (fresh install) or the library: wait for either.
+        compose.waitUntil(timeout) {
+            compose.onAllNodesWithText("Get started").fetchSemanticsNodes().isNotEmpty() ||
+                compose.onAllNodesWithText("Open PDF").fetchSemanticsNodes().isNotEmpty()
+        }
         if (compose.onAllNodesWithText("Get started").fetchSemanticsNodes().isNotEmpty()) {
             compose.onNodeWithText("Get started").performClick()
         }

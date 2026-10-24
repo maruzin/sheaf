@@ -43,6 +43,20 @@ internal object ZoomMath {
         return (viewportWidthPx * snapped).roundToInt().coerceIn(1, MAX_RENDER_WIDTH_PX)
     }
 
+    /** Longest bitmap height. Very tall pages (receipts, web exports) render narrower instead. */
+    const val MAX_RENDER_HEIGHT_PX = MAX_RENDER_WIDTH_PX * 3
+
+    /**
+     * Bitmap size for a page of [aspectRatio] (height / width) at [targetWidthPx], keeping the
+     * page's proportions when the height cap applies (stretching used to squash tall pages).
+     */
+    fun renderSize(targetWidthPx: Int, aspectRatio: Float): Pair<Int, Int> {
+        val ratio = aspectRatio.coerceAtLeast(0.01f)
+        val width = minOf(targetWidthPx, (MAX_RENDER_HEIGHT_PX / ratio).toInt()).coerceAtLeast(1)
+        val height = (width * ratio).roundToInt().coerceIn(1, MAX_RENDER_HEIGHT_PX)
+        return width to height
+    }
+
     /** Next zoom level for a double-tap: zoom in from fit-width, otherwise return to fit-width. */
     fun doubleTapTarget(current: Float): Float = if (current > MIN_ZOOM + 0.05f) MIN_ZOOM else DOUBLE_TAP_ZOOM
 }

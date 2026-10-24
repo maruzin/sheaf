@@ -1,5 +1,6 @@
 package com.sheaf.feature.reader.library
 
+import com.sheaf.core.domain.tabs.OpenTabsRepository
 import androidx.core.graphics.createBitmap
 import androidx.core.net.toUri
 import android.content.Intent
@@ -35,6 +36,7 @@ import kotlin.math.roundToInt
 class LibraryViewModel @Inject constructor(
     private val repository: DocumentRepository,
     private val renderFactory: PdfRenderSourceFactory,
+    private val openTabs: OpenTabsRepository,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -106,7 +108,7 @@ class LibraryViewModel @Inject constructor(
             runCatching {
                 val existing = repository.findByUri(uri)
                 val id = existing?.id ?: run {
-                    val pageCount = renderFactory.open(uri).use { it.pageCount }
+                    val pageCount = countPages(renderFactory, uri)
                     repository.upsert(
                         Document(
                             id = 0,
@@ -134,19 +136,29 @@ class LibraryViewModel @Inject constructor(
      */
     fun remove(document: Document) {
         viewModelScope.launch {
-            runCatching { repository.delete(document.id) }
+            // Delete the library row first; only touch files once it is really gone, so a failed
+            // delete never leaves a row pointing at a missing file.
+            if (runCatching { repository.delete(document.id) }.isFailure) {
+                _error.value = "Couldn't remove that document"
+                return@launch
+            }
+            runCatching { openTabs.close(document.id) }
             withContext(Dispatchers.IO) {
-                val uri = document.uri.toUri()
-                if (uri.scheme == "file") {
-                    val file = uri.path?.let { File(it) }
-                    if (file != null && file.canonicalPath.startsWith(context.filesDir.canonicalPath)) file.delete()
-                } else {
-                    runCatching {
+                runCatching {
+                    val uri = document.uri.toUri()
+                    if (uri.scheme == "file") {
+                        val file = uri.path?.let { File(it) }
+                        val ownDir = context.filesDir.canonicalPath + File.separator
+                        if (file != null && file.canonicalPath.startsWith(ownDir)) file.delete()
+                    } else {
                         context.contentResolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     }
                 }
-                File(context.cacheDir, "thumbs").listFiles { f -> f.name.startsWith("${document.uri.hashCode()}_") }
-                    ?.forEach { it.delete() }
+                runCatching {
+                    File(context.cacheDir, "thumbs")
+                        .listFiles { f -> f.name.startsWith("${document.uri.hashCode()}_") }
+                        ?.forEach { it.delete() }
+                }
             }
             thumbs.remove(document.uri)
         }
@@ -156,6 +168,17 @@ class LibraryViewModel @Inject constructor(
         viewModelScope.launch { repository.setBookmarked(document.id, !document.isBookmarked) }
     }
 }
+
+/**
+ * Page count for a newly imported PDF. Password-protected files can't be counted until unlocked:
+ * they are imported with 0 pages and the reader fills in the real count after the password.
+ */
+suspend fun countPages(factory: PdfRenderSourceFactory, uri: String): Int =
+    try {
+        factory.open(uri).use { it.pageCount }
+    } catch (protected: SecurityException) {
+        0
+    }
 
 // Small helper so we can use the render source in a use{} block.
 private inline fun <T> com.sheaf.feature.reader.render.PdfRenderSource.use(block: (com.sheaf.feature.reader.render.PdfRenderSource) -> T): T {

@@ -925,7 +925,8 @@ private fun PageList(
     contentPadding: PaddingValues,
 ) {
     val pages = remember(pageCount) { (0 until pageCount).toList() }
-    val pageFilter = remember(theme) { PageColors.pageFilter(theme) }
+    val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val pageFilter = remember(theme, systemDark) { PageColors.pageFilter(theme, systemDark) }
     // Real layout zoom: pages are laid out zoom x wider than the viewport and the user pans
     // horizontally, so text actually gets bigger (the old version only re-rendered sharper bitmaps).
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -933,7 +934,10 @@ private fun PageList(
         val viewportWidth = maxWidth
         val viewportWidthPx = with(density) { viewportWidth.roundToPx() }.coerceAtLeast(1)
         val hScroll = rememberScrollState()
-        val currentZoom by androidx.compose.runtime.rememberUpdatedState(zoom)
+        // Live zoom, updated immediately on each pinch event: several events can arrive before the
+        // next recomposition, and compounding from a stale value made the focal point drift.
+        var currentZoom by remember { mutableFloatStateOf(zoom) }
+        LaunchedEffect(zoom) { currentZoom = zoom }
         // Scroll corrections that keep the pinch focus point still; applied after the next layout.
         var pendingX by remember { mutableStateOf<Float?>(null) }
         var pendingY by remember { mutableFloatStateOf(0f) }
@@ -945,7 +949,8 @@ private fun PageList(
             if (factor == 1f) return
             val baseX = pendingX ?: hScroll.value.toFloat()
             pendingX = ZoomMath.focalScroll(baseX, focus.x, factor)
-            pendingY += (factor - 1f) * (listState.firstVisibleItemScrollOffset + focus.y)
+            pendingY += (factor - 1f) * (listState.firstVisibleItemScrollOffset + pendingY + focus.y)
+            currentZoom = newZoom
             onZoomChange(newZoom)
             zoomGeneration++
         }
@@ -1033,12 +1038,12 @@ private fun PdfPageItem(
     onFormValue: (String, String) -> Unit,
     renderPage: suspend (Int, Int, Int) -> android.graphics.Bitmap?,
 ) {
-    val targetHeightPx = (renderWidthPx * aspectRatio).roundToInt().coerceIn(1, ZoomMath.MAX_RENDER_WIDTH_PX * 3)
+    val (bitmapWidthPx, bitmapHeightPx) = ZoomMath.renderSize(renderWidthPx, aspectRatio)
 
     // Keeps showing the previous bitmap while a sharper one renders, so zooming never flashes blank.
     var bitmap by remember(pageIndex) { mutableStateOf<android.graphics.Bitmap?>(null) }
-    LaunchedEffect(pageIndex, renderWidthPx, targetHeightPx) {
-        renderPage(pageIndex, renderWidthPx, targetHeightPx)?.let { bitmap = it }
+    LaunchedEffect(pageIndex, bitmapWidthPx, bitmapHeightPx) {
+        renderPage(pageIndex, bitmapWidthPx, bitmapHeightPx)?.let { bitmap = it }
     }
 
     val live = remember(pageIndex) { mutableStateListOf<Offset>() }

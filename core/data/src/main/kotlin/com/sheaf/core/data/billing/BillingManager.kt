@@ -95,20 +95,25 @@ class BillingManager @Inject constructor(
         }.getOrNull()
     }
 
-    suspend fun restore() {
+    /**
+     * Re-checks Play for the Pro purchase. Returns true if owned, false if Play reports none,
+     * or null if Play couldn't be reached (the cached entitlement is then left unchanged).
+     */
+    suspend fun restore(): Boolean? {
         ensureConnected()
         val params = QueryPurchasesParams.newBuilder()
             .setProductType(BillingClient.ProductType.INAPP)
             .build()
-        val result = runCatching { client.queryPurchasesAsync(params) }.getOrNull() ?: return
+        val result = runCatching { client.queryPurchasesAsync(params) }.getOrNull() ?: return null
         // Only trust a successful answer from Play; on errors keep the cached entitlement.
-        if (result.billingResult.responseCode != BillingClient.BillingResponseCode.OK) return
+        if (result.billingResult.responseCode != BillingClient.BillingResponseCode.OK) return null
         val owned = result.purchasesList.any {
             it.products.contains(PRO_ID) && it.purchaseState == Purchase.PurchaseState.PURCHASED
         }
         result.purchasesList.forEach { handlePurchase(it) }
         // Play no longer reports the purchase (refunded or revoked): remove Pro.
         if (!owned) settings.setPro(false)
+        return owned
     }
 
     private suspend fun handlePurchase(purchase: Purchase) {

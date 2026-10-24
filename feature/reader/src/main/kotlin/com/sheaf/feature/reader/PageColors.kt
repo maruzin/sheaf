@@ -25,10 +25,12 @@ internal object PageColors {
     // Sepia: multiply white paper to #F4ECD8 (warm), leaving black text black.
     private val sepiaMatrix = ColorMatrix().apply { setToScale(0xF4 / 255f, 0xEC / 255f, 0xD8 / 255f, 1f) }
 
-    fun pageFilter(theme: ReaderTheme): ColorFilter? = when (theme) {
+    /** [systemDark]: whether the device is in dark mode ("System" then reads like Dark). */
+    fun pageFilter(theme: ReaderTheme, systemDark: Boolean): ColorFilter? = when (theme) {
         ReaderTheme.Dark -> ColorFilter.colorMatrix(darkMatrix)
         ReaderTheme.Sepia -> ColorFilter.colorMatrix(sepiaMatrix)
-        ReaderTheme.Light, ReaderTheme.System -> null
+        ReaderTheme.System -> if (systemDark) ColorFilter.colorMatrix(darkMatrix) else null
+        ReaderTheme.Light -> null
     }
 }
 

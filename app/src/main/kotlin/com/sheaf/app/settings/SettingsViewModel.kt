@@ -53,8 +53,11 @@ class SettingsViewModel @Inject constructor(
 
     fun restore() {
         viewModelScope.launch {
-            runCatching { billing.restore() }
-            _message.value = if (state.value.isPro) "Sheaf Pro is active" else "No previous purchase found"
+            _message.value = when (runCatching { billing.restore() }.getOrNull()) {
+                true -> "Sheaf Pro is active"
+                false -> "No previous purchase found"
+                null -> "Couldn't reach Google Play. Check your connection and try again."
+            }
         }
     }
 }

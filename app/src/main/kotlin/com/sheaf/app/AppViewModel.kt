@@ -21,7 +21,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.sheaf.feature.reader.library.countPages
 import java.io.File
+import java.security.MessageDigest
 import javax.inject.Inject
 
 data class AppState(
@@ -55,14 +57,6 @@ class AppViewModel @Inject constructor(
                 runCatching {
                     val src = uriString.toUri()
                     val name = queryDisplayName(src)
-                    // Opening the same file again (same name + size) reuses the library entry
-                    // instead of stacking duplicate copies.
-                    val size = querySize(src)
-                    if (size > 0) {
-                        repository.findByNameAndSize(name, size)?.let { existing ->
-                            if (documentFileExists(existing.uri)) return@runCatching existing.id
-                        }
-                    }
                     val dir = File(context.filesDir, "opened").apply { mkdirs() }
                     val out = File(dir, "open_${System.currentTimeMillis()}.pdf")
                     val copied = context.contentResolver.openInputStream(src)?.use { input ->
@@ -73,21 +67,22 @@ class AppViewModel @Inject constructor(
                         out.delete()
                         return@runCatching null
                     }
-                    val fileUri = Uri.fromFile(out).toString()
-                    val pageCount = renderFactory.open(fileUri).let { s ->
-                        try {
-                            s.pageCount
-                        } finally {
-                            s.close()
-                        }
+                    // Opening the same file again reuses its library entry instead of stacking
+                    // copies, but only when an earlier Sheaf-owned copy is byte-for-byte identical
+                    // (name + size alone could match a different document).
+                    existingIdenticalCopy(name, out)?.let { existingId ->
+                        out.delete()
+                        return@runCatching existingId
                     }
+                    val fileUri = Uri.fromFile(out).toString()
                     repository.upsert(
                         Document(
                             id = 0,
                             uri = fileUri,
                             displayName = name,
                             sizeBytes = out.length(),
-                            pageCount = pageCount,
+                            // 0 for password-protected files; the reader fills it in after unlock.
+                            pageCount = countPages(renderFactory, fileUri),
                             lastOpenedAt = System.currentTimeMillis(),
                             addedAt = System.currentTimeMillis(),
                         ),
@@ -98,24 +93,32 @@ class AppViewModel @Inject constructor(
         }
     }
 
-    private fun querySize(uri: Uri): Long {
-        if (uri.scheme == "file") return uri.path?.let { File(it).length() } ?: -1L
-        var size = -1L
-        runCatching {
-            context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { c ->
-                val idx = c.getColumnIndex(OpenableColumns.SIZE)
-                if (c.moveToFirst() && idx >= 0 && !c.isNull(idx)) size = c.getLong(idx)
-            }
-        }
-        return size
+    private suspend fun existingIdenticalCopy(name: String, copy: File): Long? {
+        val candidate = repository.findByNameAndSize(name, copy.length()) ?: return null
+        val candidateUri = candidate.uri.toUri()
+        if (candidateUri.scheme != "file") return null
+        val candidateFile = candidateUri.path?.let { File(it) } ?: return null
+        val ownDir = File(context.filesDir, "opened").canonicalPath + File.separator
+        if (!candidateFile.exists() || !candidateFile.canonicalPath.startsWith(ownDir)) return null
+        return if (sha256(candidateFile).contentEquals(sha256(copy))) candidate.id else null
     }
 
-    private fun documentFileExists(uri: String): Boolean {
-        val parsed = uri.toUri()
-        return if (parsed.scheme == "file") parsed.path?.let { File(it).exists() } == true else true
+    private fun sha256(file: File): ByteArray {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest()
     }
 
     private fun queryDisplayName(uri: Uri): String {
+        // file:// links have no content provider to ask; use the file's own name.
+        if (uri.scheme == "file") return uri.lastPathSegment?.takeIf { it.isNotBlank() } ?: "Document.pdf"
         var name = "Document.pdf"
         runCatching {
             context.contentResolver.query(uri, null, null, null, null)?.use { c ->

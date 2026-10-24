@@ -33,6 +33,12 @@ class AndroidPdfRenderSource private constructor(
 
     private val mutex = Mutex()
 
+    // close() can arrive while a render holds the (single) open page. Closing the renderer under it
+    // throws and leaks the native renderer, so a busy close is deferred to the end of that render.
+    @Volatile private var closed = false
+    private val closeLock = Any()
+    private var released = false
+
     override val pageCount: Int get() = renderer.pageCount
 
     override fun pageAspectRatio(pageIndex: Int): Float =
@@ -42,12 +48,17 @@ class AndroidPdfRenderSource private constructor(
         withContext(io) {
             require(widthPx > 0 && heightPx > 0) { "render size must be positive" }
             mutex.withLock {
-                val bitmap = createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888)
-                bitmap.eraseColor(Color.WHITE)
-                renderer.openPage(pageIndex).use { page ->
-                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                check(!closed) { "render source closed" }
+                try {
+                    val bitmap = createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888)
+                    bitmap.eraseColor(Color.WHITE)
+                    renderer.openPage(pageIndex).use { page ->
+                        page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    }
+                    bitmap
+                } finally {
+                    if (closed) releaseNow()
                 }
-                bitmap
             }
         }
 
@@ -56,6 +67,20 @@ class AndroidPdfRenderSource private constructor(
     override suspend fun outline(): List<OutlineEntry> = emptyList()
 
     override fun close() {
+        closed = true
+        // Free now if no render is in flight; otherwise the in-flight render frees on exit.
+        if (mutex.tryLock()) {
+            try {
+                releaseNow()
+            } finally {
+                mutex.unlock()
+            }
+        }
+    }
+
+    private fun releaseNow() = synchronized(closeLock) {
+        if (released) return@synchronized
+        released = true
         runCatching { renderer.close() }
         runCatching { pfd.close() }
     }

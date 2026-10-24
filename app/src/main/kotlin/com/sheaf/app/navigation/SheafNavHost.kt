@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -120,11 +122,21 @@ private fun AdaptiveLibrary(
     onOpenSettings: () -> Unit,
     onManagePages: (Long) -> Unit,
 ) {
+    // Hoisted above the width branch so folding/rotating below 840dp hands the open document to
+    // the full-screen reader instead of dropping it.
+    var selected by rememberSaveable { mutableStateOf<Long?>(null) }
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        if (maxWidth < TwoPaneMinWidth) {
+        val twoPane = maxWidth >= TwoPaneMinWidth
+        LaunchedEffect(twoPane, selected) {
+            val id = selected
+            if (!twoPane && id != null) {
+                selected = null
+                onOpenReaderFullScreen(id)
+            }
+        }
+        if (!twoPane) {
             LibraryScreen(onOpenDocument = onOpenReaderFullScreen, onOpenSettings = onOpenSettings)
         } else {
-            var selected by rememberSaveable { mutableStateOf<Long?>(null) }
             Row(Modifier.fillMaxSize()) {
                 LibraryScreen(
                     onOpenDocument = { selected = it },
@@ -143,14 +155,17 @@ private fun AdaptiveLibrary(
                     }
                 } else {
                     key(id) {
+                        // These ViewModels live as long as the library screen, so free each one's
+                        // renderer, caches and unlocked copy as soon as its document leaves the pane.
+                        val paneViewModel = hiltViewModel<ReaderViewModel>(key = "reader-pane-$id")
+                        DisposableEffect(paneViewModel) { onDispose { paneViewModel.release() } }
                         ReaderScreen(
                             documentId = id,
                             onBack = { selected = null },
                             onManagePages = onManagePages,
                             onOpenDocument = { selected = it },
                             onSwitchDocument = { selected = it },
-                            // One ViewModel per document in this pane (the nav entry is shared).
-                            viewModel = hiltViewModel<ReaderViewModel>(key = "reader-pane-$id"),
+                            viewModel = paneViewModel,
                             modifier = Modifier.weight(1f).fillMaxHeight(),
                         )
                     }

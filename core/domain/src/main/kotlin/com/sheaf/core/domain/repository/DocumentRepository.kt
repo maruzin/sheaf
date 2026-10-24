@@ -16,6 +16,8 @@ interface DocumentRepository {
     suspend fun readingPosition(documentId: Long): ReadingPosition?
     /** Finds a document with the same display name and size (used to de-duplicate "Open with" copies). */
     suspend fun findByNameAndSize(displayName: String, sizeBytes: Long): Document?
+    /** Records the real page count once known (protected PDFs are imported before unlocking). */
+    suspend fun setPageCount(documentId: Long, pageCount: Int)
     /** Bumps the document to the top of recents. */
     suspend fun markOpened(documentId: Long)
     /** Removes the document and its annotations from the library index. */

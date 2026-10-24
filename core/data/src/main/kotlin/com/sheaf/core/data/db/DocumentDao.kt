@@ -25,6 +25,9 @@ interface DocumentDao {
     @Query("SELECT * FROM documents WHERE displayName = :name AND sizeBytes = :size LIMIT 1")
     suspend fun byNameAndSize(name: String, size: Long): DocumentEntity?
 
+    @Query("UPDATE documents SET pageCount = :pageCount WHERE id = :id")
+    suspend fun setPageCount(id: Long, pageCount: Int)
+
     @Query("UPDATE documents SET lastOpenedAt = :now WHERE id = :id")
     suspend fun touch(id: Long, now: Long)
 

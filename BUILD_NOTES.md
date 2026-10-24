@@ -51,7 +51,28 @@ Running engineering log. Newest first. Every non-obvious decision gets one line 
 - Ink toolbar and Manage-pages buttons overflowed and were clipped on phones. Onboarding showed black
   text in dark theme (earlier pass).
 
-**Tests:** 38 JVM tests (was 6), including Robolectric tests that run the real PdfBox engine
+**Round 2: found by the emulator tests (CI) and an independent code review**
+- Password-protected PDFs couldn't be imported at all, from either "Open with" or the picker: the
+  page count threw. They now import with 0 pages, the reader fills in the count after unlock, and the
+  library shows "Password protected".
+- "Open with" on a file:// link named every document "Document.pdf". It now uses the file name.
+- The saved page was never scrolled to (counter said 31, page 1 shown, then page 1 overwrote 31).
+  Open now scrolls to it, and nothing is saved unless a document actually loaded.
+- Tablet two-pane kept every opened document's renderer alive. Each one is released when it leaves
+  the pane, and folding below 840dp hands the document to the full-screen reader.
+- "Open with" de-dup only reuses a Sheaf-owned copy that is byte-identical (SHA-256), never a
+  different document with the same name and size.
+- "Remove from library" warns that Sheaf-only files are deleted permanently. It deletes files only
+  after the row is gone, closes the tab, and can't crash on IO errors.
+- Restore purchase gives the right message (owned / none / Play unreachable).
+- The renderer is closed safely during an in-flight render. Very tall pages keep their proportions.
+  "System" theme darkens pages in dark mode. Fast pinches compound zoom correctly.
+- A failed text extraction no longer looks like "no text layer". Search and reading mode share one
+  extraction.
+- Backups now include settings only (no PDFs or library DB, which broke the 25 MB quota and restored
+  rows pointing at missing files).
+
+**Tests:** 45 JVM tests (was 6), including Robolectric tests that run the real PdfBox engine
 (text, outline, AES round-trip, wrong-password cleanup, unreadable-source handling) and ViewModel
 tests for each bug above. `app/src/androidTest` has end-to-end UI tests (open, search, reflow,
 theme, rotation, password, tabs, remove). CI `device-tests.yml` runs them on API 35 + 29 emulators
