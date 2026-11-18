@@ -4,6 +4,18 @@ Running engineering log. Newest first. Every non-obvious decision gets one line 
 
 ---
 
+## 1.1.0 (versionCode 7), 2026-11-18: Play Console warnings fixed and guarded
+- **R8**: removed blanket keeps for Google Play services and Play Billing (both ship consumer rules;
+  they pinned 58% of all kept entries). Release dex 7.2 MB -> 5.9 MB, kept entries 46,260 -> 19,332.
+  The shrunk release APK was smoke-tested on the emulator (launch, scanner, open, search, reading mode,
+  Manage pages, share with markup, diagnostic log): 0 crashes.
+- **Edge-to-edge**: disassembly shows Sheaf's code calls none of the deprecated Window APIs; the flagged
+  calls are androidx.activity/core back-compat branches used by `enableEdgeToEdge()` on Android 6-10.
+- **Guard**: `scripts/check-play-warnings.sh` runs first in CI and fails on deprecated edge-to-edge APIs in
+  app code, a missing `enableEdgeToEdge()`, blanket library keep rules, or required touchscreen/camera.
+- UX: opening Search focuses the field and shows the keyboard.
+- Tests: 66 unit, 8 device, strict lint (debug + release), signed bundle verified (DeanPlay).
+
 ## 1.1.0 (versionCode 6), 2026-11-18: diagnostics log, optional hardware, upload key
 - **Diagnostic log** (`core/data/log/AppLog`): errors and warnings go to logcat and a rotating on-device
   file (`files/logs`, 2 x 256 KB); an uncaught-exception handler writes `last-crash.txt` (stack, version,

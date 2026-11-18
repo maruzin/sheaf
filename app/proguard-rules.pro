@@ -7,14 +7,15 @@
 -keep class com.tom_roush.** { *; }
 -dontwarn com.tom_roush.**
 
-# ML Kit document scanner + Latin text recognition.
+# ML Kit Latin text recognition: kept whole because OCR loads its pipeline reflectively and can't be
+# exercised without Pro on a test device. Revisit with R8 Configuration Analyzer.
 -keep class com.google.mlkit.** { *; }
 -dontwarn com.google.mlkit.**
--keep class com.google.android.gms.** { *; }
--dontwarn com.google.android.gms.**
 
-# Google Play Billing.
--keep class com.android.billingclient.** { *; }
+# Google Play services (document scanner) and Play Billing ship their own consumer R8 rules. A blanket
+# keep of com.google.android.gms.** pinned ~27,000 entries (58% of all keeps) and blocked R8
+# optimisation (Play Console "Improve memory and performance with R8"), so it was removed.
+-dontwarn com.google.android.gms.**
 
 # Kotlin coroutines internals (defensive; consumer rules usually cover these).
 -dontwarn kotlinx.coroutines.**

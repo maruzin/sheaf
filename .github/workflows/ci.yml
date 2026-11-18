@@ -25,6 +25,9 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Guard against known Play Console warnings
+        run: ./scripts/check-play-warnings.sh
+
       - name: Assemble debug
         run: ./gradlew assembleDebug --stacktrace
 
