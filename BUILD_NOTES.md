@@ -4,6 +4,12 @@ Running engineering log. Newest first. Every non-obvious decision gets one line 
 
 ---
 
+## 1.1.0 (versionCode 8), 2026-11-18: portrait screen no longer required
+- Play blocked review: "Required hardware feature declarations are restricting your app's availability:
+  android.hardware.screen.portrait". Source: ML Kit's `GmsDocumentScanningDelegateActivity` is locked to
+  portrait in the library manifest, so Play inferred the feature. Declared `required="false"` (scanner UI
+  left as Google built it). CI guard extended to this feature and to landscape-locked library activities.
+
 ## 1.1.0 (versionCode 7), 2026-11-18: Play Console warnings fixed and guarded
 - **R8**: removed blanket keeps for Google Play services and Play Billing (both ship consumer rules;
   they pinned 58% of all kept entries). Release dex 7.2 MB -> 5.9 MB, kept entries 46,260 -> 19,332.

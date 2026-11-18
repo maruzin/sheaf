@@ -19,10 +19,16 @@ fi
 if grep -nE '^-keep[a-z]* class (com\.google\.android\.gms|com\.android\.billingclient|androidx|kotlin|kotlinx|com\.google\.firebase)\.\*\*' app/proguard-rules.pro; then
   echo "::error::Blanket keep rule for a library that ships its own R8 rules (Play: 'Improve memory and performance with R8')."; fail=1
 fi
-for f in android.hardware.touchscreen android.hardware.camera; do
+for f in android.hardware.touchscreen android.hardware.camera android.hardware.screen.portrait; do
   if ! grep -qE "uses-feature android:name=\"$f\" android:required=\"false\"" app/src/main/AndroidManifest.xml; then
     echo "::error::$f must be declared required=\"false\" (Play: mark non-essential hardware optional)."; fail=1
   fi
 done
+# Any library activity locked to an orientation makes Play infer a required screen feature.
+M=app/build/intermediates/merged_manifest/release/processReleaseMainManifest/AndroidManifest.xml
+if [ -f "$M" ] && grep -q 'screenOrientation="\(sensor\)\{0,1\}landscape' "$M" && \
+   ! grep -q 'android.hardware.screen.landscape" android:required="false"' app/src/main/AndroidManifest.xml; then
+  echo "::error::A merged activity is locked to landscape: declare android.hardware.screen.landscape required=\"false\"."; fail=1
+fi
 [ "$fail" -eq 0 ] && echo "Play warning guards: OK"
 exit "$fail"

@@ -12,6 +12,10 @@
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <!-- ML Kit's document scanner locks its helper activity to portrait, which makes Play infer
+         android.hardware.screen.portrait as required (hiding Sheaf from landscape-only tablets,
+         desktops and XR). Sheaf's own screens rotate freely, so declare it optional. -->
+    <uses-feature android:name="android.hardware.screen.portrait" android:required="false" />
 
     <application
         android:name=".SheafApplication"

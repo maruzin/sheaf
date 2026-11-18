@@ -72,7 +72,7 @@ policy. Easiest free option: enable **GitHub Pages** on the repo and use
 - Play Billing Library too old — since 31 Aug 2026, **v8 or later** is required. Sheaf uses **8.3.0**. ✔
 - 16 KB memory pages — required for apps targeting Android 15+. All bundled native libs (ML Kit OCR,
   DataStore, Compose graphics) are 16 KB-aligned (checked with `zipalign -c -P 16`). ✔
-- versionCode must go up on every upload (currently **7**, in `AndroidApplicationConventionPlugin.kt`).
+- versionCode must go up on every upload (currently **8**, in `AndroidApplicationConventionPlugin.kt`).
 - Data safety says "no data" while ML Kit sends diagnostics — see the answers above.
 - Store listing / onboarding mentioning features that aren't shipped (e.g. AI chat) → misleading claims.
 - Testing the purchase on a non-license-tester account (it will attempt a real charge).
@@ -112,5 +112,5 @@ Guarded in CI by `scripts/check-play-warnings.sh`.
   7.2 MB -> 5.9 MB, kept entries 46,260 -> 19,332. Release build smoke-tested on an emulator with no crashes.
   PdfBox and ML Kit keeps remain (reflection; OCR untestable without Pro): narrow them next with Google's
   R8 Configuration Analyzer and a Pro test device.
-- **"Mark non-essential hardware features as optional"**: touchscreen and camera are `required="false"`.
+- **"Mark non-essential hardware features as optional" / "Required hardware feature declarations are restricting your app's availability"**: touchscreen, camera and `android.hardware.screen.portrait` are `required="false"`. The portrait one is inferred from ML Kit's scanner activity, which is locked to portrait (versionCode 8).
 
