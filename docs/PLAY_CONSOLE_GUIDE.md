@@ -72,7 +72,21 @@ policy. Easiest free option: enable **GitHub Pages** on the repo and use
 - Play Billing Library too old — since 31 Aug 2026, **v8 or later** is required. Sheaf uses **8.3.0**. ✔
 - 16 KB memory pages — required for apps targeting Android 15+. All bundled native libs (ML Kit OCR,
   DataStore, Compose graphics) are 16 KB-aligned (checked with `zipalign -c -P 16`). ✔
-- versionCode must go up on every upload (currently **3**, in `AndroidApplicationConventionPlugin.kt`).
+- versionCode must go up on every upload (currently **4**, in `AndroidApplicationConventionPlugin.kt`).
 - Data safety says "no data" while ML Kit sends diagnostics — see the answers above.
 - Store listing / onboarding mentioning features that aren't shipped (e.g. AI chat) → misleading claims.
 - Testing the purchase on a non-license-tester account (it will attempt a real charge).
+
+## Re-checked 2026-11-18 (official Google sources)
+- **16 KB pages:** Play blocks updates without 16 KB support from **1 Feb 2027**. Re-run
+  `zipalign -c -P 16` on every release bundle.
+- **Billing v8** stays accepted until **31 Aug 2027**; plan the move to v9 before then.
+- **Organisation account (Plentrix Ltd):** needs a **D-U-N-S number** (free, can take up to 30 days),
+  a verified payments profile, organisation phone and website. The 12-testers-for-14-days closed test
+  applies to *personal* accounts created after 13 Nov 2023.
+- **Target audience:** choose 18+ (the privacy policy says not for under-13s); declare **No ads**;
+  complete IARC (expected: Everyone).
+- **Data safety:** declare *Device or other IDs* and *App info and performance* (ML Kit diagnostics),
+  purpose Analytics, not shared, encrypted in transit. No account deletion question applies (no accounts).
+- **Privacy policy:** names Plentrix Ltd as controller; add the registered address before hosting.
+- **Screenshots must be real device captures** (the policy requires they reflect the actual app).

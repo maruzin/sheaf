@@ -45,6 +45,8 @@ data class ReaderUiState(
     val signaturePoints: List<NormPoint> = emptyList(),
     val annotationsListVisible: Boolean = false,
     val annotationsByPage: Map<Int, List<Annotation>> = emptyMap(),
+    val canUndo: Boolean = false,
+    val canRedo: Boolean = false,
     // Forms (AcroForm fill)
     val formFields: List<FormField> = emptyList(),
     val formMode: Boolean = false,
@@ -92,6 +94,8 @@ sealed interface ReaderEvent {
     data object NextResult : ReaderEvent
     data object PrevResult : ReaderEvent
     data object ToggleAnnotate : ReaderEvent
+    data object Undo : ReaderEvent
+    data object Redo : ReaderEvent
     data class SetInkColor(val argb: Int) : ReaderEvent
     data class SetHighlighter(val on: Boolean) : ReaderEvent
     data class SetNoteMode(val on: Boolean) : ReaderEvent
@@ -110,6 +114,7 @@ sealed interface ReaderEvent {
     data object ConsumeFlattened : ReaderEvent
     data object ShowPaywall : ReaderEvent
     data object DismissPaywall : ReaderEvent
+    data object RestorePurchase : ReaderEvent
     data object ConsumeBillingMessage : ReaderEvent
     data class SubmitOpenPassword(val password: String) : ReaderEvent
     data object CancelOpenPassword : ReaderEvent

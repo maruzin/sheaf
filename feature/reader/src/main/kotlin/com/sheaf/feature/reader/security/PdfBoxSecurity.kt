@@ -23,7 +23,7 @@ class PdfBoxSecurity @Inject constructor(
     override suspend fun encrypt(uri: String, password: String): String? = withContext(io) {
         if (password.isBlank()) return@withContext null
         ensureInit()
-        val out = File(context.cacheDir, "protected_${System.currentTimeMillis()}.pdf")
+        val out = File(File(context.cacheDir, "share").apply { mkdirs() }, "protected_${System.currentTimeMillis()}.pdf")
         val saved = runCatching {
             context.contentResolver.openInputStream(uri.toUri())?.use { input ->
                 PDDocument.load(input, PdfBoxMemory.setting()).use { doc ->

@@ -27,7 +27,7 @@ READ COMFORTABLY
 • Full-text search and table of contents navigation
 • Tabs: keep several PDFs open and switch between them instantly
 • Picks up exactly where you left off in every document
-• Two-pane layout on tablets and foldables
+• Library and document side by side on large tablets and unfolded foldables
 
 ANNOTATE & SIGN
 • Highlight passages and draw with a pen in six colours
@@ -55,10 +55,11 @@ SHEAF PRO: ONE-TIME PURCHASE, NO SUBSCRIPTION
 • OCR: turn scans into searchable, selectable text
 • Compress PDF: reduce file size for email and upload
 • Password-protect a PDF with AES encryption
+• Merge several PDFs into one
 
 PRIVATE BY DESIGN
 Sheaf works offline and processes your files locally. Scanning and OCR use Google ML Kit
-on-device. We never see your documents. No ads, no analytics, no account.
+on-device. We never see your documents. No ads, no tracking, no account.
 
 ACCESSIBLE
 Works with TalkBack. Every page, tool and control is labelled, and reading mode text scales
@@ -85,7 +86,7 @@ Most users decide from the first 3 screenshots. Lead with the reasons people swi
 6. "Scan paper to PDF": scanner result in the library
 7. "Tabs for every document": tab row with 3 documents
 8. "One-time Pro. No ads, ever": paywall with price
-Also provide 7" and 10" tablet sets showing the two-pane layout (this unlocks tablet
+Also provide 7" and 10" tablet sets (two-pane shows at 840dp+, so use the 10" set or landscape for it) (this unlocks tablet
 featuring and the "Designed for tablets" badge).
 
 ## Feature graphic (1024x500)

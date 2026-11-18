@@ -8,11 +8,14 @@ import com.sheaf.core.domain.model.ReadingPosition
 import com.sheaf.core.domain.repository.DocumentRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import androidx.room.withTransaction
+import com.sheaf.core.data.db.SheafDatabase
 import javax.inject.Inject
 
 class DefaultDocumentRepository @Inject constructor(
     private val dao: DocumentDao,
     private val annotationDao: AnnotationDao,
+    private val db: SheafDatabase,
 ) : DocumentRepository {
 
     override fun observeRecents(limit: Int): Flow<List<Document>> =
@@ -48,9 +51,12 @@ class DefaultDocumentRepository @Inject constructor(
     override suspend fun markOpened(documentId: Long) = dao.touch(documentId, System.currentTimeMillis())
 
     override suspend fun delete(documentId: Long) {
-        // Annotations reference documents by id only (no FK), so remove them explicitly.
-        annotationDao.deleteForDocument(documentId)
-        dao.delete(documentId)
+        // Annotations reference documents by id only (no FK), so remove them explicitly, in one
+        // transaction: a crash in between must not leave orphan annotations or a half-deleted row.
+        db.withTransaction {
+            annotationDao.deleteForDocument(documentId)
+            dao.delete(documentId)
+        }
     }
 }
 

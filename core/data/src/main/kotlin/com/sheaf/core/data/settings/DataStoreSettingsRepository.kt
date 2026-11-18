@@ -4,30 +4,43 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.sheaf.core.domain.repository.SettingsRepository
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
+import java.io.IOException
 import javax.inject.Inject
 
 class DataStoreSettingsRepository @Inject constructor(
     private val dataStore: DataStore<Preferences>,
+    // The handwritten signature lives in noBackupFilesDir: personal data that must not go to cloud backup.
+    @SignatureStore private val signatureStore: DataStore<Preferences>,
 ) : SettingsRepository {
 
+    // A corrupt or unreadable preferences file must not crash every screen that collects a setting:
+    // fall back to defaults instead.
+    private val prefs = dataStore.data.catch { e ->
+        if (e is IOException) emit(emptyPreferences()) else throw e
+    }
+
     override val dynamicColor: Flow<Boolean> =
-        dataStore.data.map { it[KEY_DYNAMIC] ?: false }
+        prefs.map { it[KEY_DYNAMIC] ?: false }
 
     override val defaultReaderTheme: Flow<String> =
-        dataStore.data.map { it[KEY_READER_THEME] ?: "System" }
+        prefs.map { it[KEY_READER_THEME] ?: "System" }
 
     override val onboardingComplete: Flow<Boolean> =
-        dataStore.data.map { it[KEY_ONBOARDING] ?: false }
+        prefs.map { it[KEY_ONBOARDING] ?: false }
 
     override val signature: Flow<String> =
-        dataStore.data.map { it[KEY_SIGNATURE] ?: "" }
+        signatureStore.data
+            .catch { e -> if (e is IOException) emit(emptyPreferences()) else throw e }
+            .map { it[KEY_SIGNATURE] ?: "" }
 
     override val isPro: Flow<Boolean> =
-        dataStore.data.map { it[KEY_PRO] ?: false }
+        prefs.map { it[KEY_PRO] ?: false }
 
     override suspend fun setDynamicColor(enabled: Boolean) {
         dataStore.edit { it[KEY_DYNAMIC] = enabled }
@@ -42,14 +55,14 @@ class DataStoreSettingsRepository @Inject constructor(
     }
 
     override suspend fun setSignature(encoded: String) {
-        dataStore.edit { it[KEY_SIGNATURE] = encoded }
+        signatureStore.edit { it[KEY_SIGNATURE] = encoded }
     }
 
     override suspend fun setPro(value: Boolean) {
         dataStore.edit { it[KEY_PRO] = value }
     }
 
-    private companion object {
+    internal companion object {
         val KEY_DYNAMIC = booleanPreferencesKey("dynamic_color")
         val KEY_READER_THEME = stringPreferencesKey("default_reader_theme")
         val KEY_ONBOARDING = booleanPreferencesKey("onboarding_complete")

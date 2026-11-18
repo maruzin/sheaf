@@ -2,6 +2,10 @@ package com.sheaf.feature.reader.render
 
 import android.graphics.Bitmap
 import com.sheaf.core.domain.model.OutlineEntry
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+
+private val NO_UPDATES: StateFlow<Int> = MutableStateFlow(0)
 
 /**
  * Engine-agnostic contract for rendering a PDF. The M1 baseline is backed by the platform
@@ -15,6 +19,9 @@ interface PdfRenderSource {
 
     /** height/width of a page, so the UI can lay out the slot before the bitmap is ready. */
     fun pageAspectRatio(pageIndex: Int): Float
+
+    /** Bumps when more page shapes become known (pages measured after open), so the UI re-lays out. */
+    val ratioVersion: StateFlow<Int> get() = NO_UPDATES
 
     /** Document outline; empty when the engine exposes none (PdfRenderer has no outline API). */
     suspend fun outline(): List<OutlineEntry>

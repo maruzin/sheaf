@@ -11,6 +11,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,6 +37,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.Gesture
@@ -73,6 +78,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
@@ -147,6 +158,8 @@ fun ReaderScreen(
     onSwitchDocument: (Long) -> Unit = onOpenDocument,
     viewModel: ReaderViewModel = hiltViewModel(),
 ) {
+    val shareScope = rememberCoroutineScope()
+    val ratioVersion by viewModel.ratioVersion.collectAsStateWithLifecycle()
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
@@ -173,19 +186,19 @@ fun ReaderScreen(
     }
     LaunchedEffect(state.filledUri) {
         state.filledUri?.let { path ->
-            shareFilledPdf(context, path, state.displayName)
+            shareFilledPdf(context, path, state.displayName, "filled")
             viewModel.onEvent(ReaderEvent.ConsumeFilled)
         }
     }
     LaunchedEffect(state.protectedPath) {
         state.protectedPath?.let { path ->
-            shareFilledPdf(context, path, state.displayName)
+            shareFilledPdf(context, path, state.displayName, "protected")
             viewModel.onEvent(ReaderEvent.ConsumeProtected)
         }
     }
     LaunchedEffect(state.compressedPath) {
         state.compressedPath?.let { path ->
-            shareFilledPdf(context, path, state.displayName)
+            shareFilledPdf(context, path, state.displayName, "compressed")
             viewModel.onEvent(ReaderEvent.ConsumeCompressed)
         }
     }
@@ -203,7 +216,7 @@ fun ReaderScreen(
     }
     LaunchedEffect(state.flattenedPath) {
         state.flattenedPath?.let { path ->
-            shareFilledPdf(context, path, state.displayName)
+            shareFilledPdf(context, path, state.displayName, "marked up")
             viewModel.onEvent(ReaderEvent.ConsumeFlattened)
         }
     }
@@ -223,7 +236,13 @@ fun ReaderScreen(
         topBar = {
             androidx.compose.foundation.layout.Column {
                 TopAppBar(
-                    title = { Text(text = state.displayName.ifBlank { "Reader" }, maxLines = 1) },
+                    title = {
+                        Text(
+                            text = state.displayName.ifBlank { "Reader" },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -274,7 +293,7 @@ fun ReaderScreen(
                         IconButton(onClick = { viewModel.onEvent(ReaderEvent.ToggleSearch) }) {
                             Icon(Icons.Filled.Search, contentDescription = "Search")
                         }
-                        IconButton(onClick = { if (state.uri.isNotBlank()) shareDocument(context, state.uri) }) {
+                        IconButton(onClick = { if (state.uri.isNotBlank()) shareScope.launch { shareDocument(context, state.uri, state.displayName) } }) {
                             Icon(Icons.Filled.Share, contentDescription = "Share")
                         }
                         IconButton(onClick = { menuOpen = true }) {
@@ -410,7 +429,19 @@ fun ReaderScreen(
                         onRedraw = { showSignatureCapture = true },
                         onColor = { viewModel.onEvent(ReaderEvent.SetInkColor(it)) },
                         onClearPage = { viewModel.clearPageAnnotations(state.currentPage) },
+                        canUndo = state.canUndo,
+                        canRedo = state.canRedo,
+                        onUndo = { viewModel.onEvent(ReaderEvent.Undo) },
+                        onRedo = { viewModel.onEvent(ReaderEvent.Redo) },
                     )
+                    if (!state.noteMode && !state.signatureMode) {
+                        Text(
+                            "Draw with one finger. Use two fingers to scroll or zoom.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 4.dp),
+                        )
+                    }
                 }
                 if (state.formMode) {
                     FormBar(
@@ -469,6 +500,7 @@ fun ReaderScreen(
                     formValues = state.formValues,
                     onFormValue = { name, value -> viewModel.onEvent(ReaderEvent.SetFormValue(name, value)) },
                     aspectRatioOf = viewModel::aspectRatio,
+                    ratioVersion = ratioVersion,
                     renderPage = { i, w, h -> viewModel.renderPage(i, w, h) },
                     listState = listState,
                     contentPadding = PaddingValues(vertical = 8.dp),
@@ -563,6 +595,7 @@ fun ReaderScreen(
             price = state.proPrice,
             onDismiss = { viewModel.onEvent(ReaderEvent.DismissPaywall) },
             onUpgrade = { (context as? Activity)?.let { viewModel.upgrade(it) } },
+            onRestore = { viewModel.onEvent(ReaderEvent.RestorePurchase) },
         )
     }
 
@@ -670,23 +703,32 @@ private fun OpenPasswordDialog(error: String?, onSubmit: (String) -> Unit, onCan
 }
 
 @Composable
-private fun PaywallDialog(price: String?, onDismiss: () -> Unit, onUpgrade: () -> Unit) {
+internal fun PaywallDialog(
+    price: String?,
+    onDismiss: () -> Unit,
+    onUpgrade: () -> Unit,
+    onRestore: () -> Unit,
+) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Sheaf Pro") },
         text = {
-            androidx.compose.foundation.layout.Column {
+            androidx.compose.foundation.layout.Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text("Unlock the advanced toolkit:")
                 Spacer(Modifier.height(8.dp))
                 Text("•  OCR — make scans searchable")
                 Text("•  Reduce file size")
                 Text("•  Password protection")
+                Text("•  Merge PDFs")
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "One-time purchase. No subscription, no ads.",
+                    if (price != null) "One-time purchase. No subscription, no ads."
+                    else "One-time purchase, price shown at checkout. No subscription, no ads.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // Bought on another device, or the launch-time restore failed offline.
+                TextButton(onClick = onRestore) { Text("Already bought? Restore") }
             }
         },
         confirmButton = {
@@ -766,6 +808,10 @@ private fun InkToolbar(
     onRedraw: () -> Unit,
     onColor: (Int) -> Unit,
     onClearPage: () -> Unit,
+    canUndo: Boolean,
+    canRedo: Boolean,
+    onUndo: () -> Unit,
+    onRedo: () -> Unit,
 ) {
     // Scrolls horizontally: 4 tools + 6 colours + actions don't fit a 360dp phone in one row.
     Row(
@@ -776,6 +822,13 @@ private fun InkToolbar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        // Undo/redo first: the most-used edit actions stay visible without scrolling the row.
+        IconButton(onClick = onUndo, enabled = canUndo) {
+            Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo")
+        }
+        IconButton(onClick = onRedo, enabled = canRedo) {
+            Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo")
+        }
         IconButton(onClick = { onTool(false) }, modifier = Modifier.toolState(!highlighter && !noteMode && !signatureMode)) {
             Icon(
                 Icons.Filled.Draw,
@@ -890,13 +943,52 @@ private fun SearchBar(
     }
 }
 
-private fun shareDocument(context: android.content.Context, uri: String) {
+private suspend fun shareDocument(context: android.content.Context, uri: String, displayName: String) {
+    // Every share goes out through Sheaf's own FileProvider:
+    // - file:// documents (scans, "Open with" copies, OCR output, edited copies) would throw
+    //   FileUriExposedException if handed over directly;
+    // - content:// documents picked with the system picker can't be re-granted reliably (the
+    //   receiving app gets "Permission Denial" from the documents provider and sees a blank file).
+    // So copy to cache/share under the library name and share that copy. It is purged after an hour.
+    val parsed = uri.toUri()
+    val copy = withContext(Dispatchers.IO) {
+        runCatching {
+            val safe = displayName.replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { "Document.pdf" }
+                .let { if (it.endsWith(".pdf", ignoreCase = true)) it else "$it.pdf" }
+            val dir = File(context.cacheDir, "share").apply { mkdirs() }
+            val out = File(dir, safe)
+            val input = if (parsed.scheme == "file") {
+                parsed.path?.let { File(it).inputStream() }
+            } else {
+                context.contentResolver.openInputStream(parsed)
+            }
+            input?.use { src -> out.outputStream().use { dst -> src.copyTo(dst) } } ?: return@runCatching null
+            out.takeIf { it.length() > 0 }
+        }.getOrNull()
+    }
+    if (copy == null) {
+        Toast.makeText(context, "Couldn't share this document", Toast.LENGTH_LONG).show()
+        return
+    }
+    val stream = runCatching {
+        FileProvider.getUriForFile(context, context.packageName + ".fileprovider", copy)
+    }.getOrNull() ?: return
+    startShare(context, stream, displayName, "Share PDF")
+}
+
+/** ACTION_SEND with the read grant attached as ClipData, so it survives the chooser hop. */
+private fun startShare(context: android.content.Context, stream: android.net.Uri, title: String, chooserTitle: String) {
     val send = Intent(Intent.ACTION_SEND).apply {
         type = "application/pdf"
-        putExtra(Intent.EXTRA_STREAM, uri.toUri())
+        putExtra(Intent.EXTRA_STREAM, stream)
+        putExtra(Intent.EXTRA_TITLE, title)
+        clipData = android.content.ClipData.newRawUri(title, stream)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
-    runCatching { context.startActivity(Intent.createChooser(send, "Share PDF")) }
+    val chooser = Intent.createChooser(send, chooserTitle).apply {
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    runCatching { context.startActivity(chooser) }
 }
 
 @Composable
@@ -920,6 +1012,7 @@ private fun PageList(
     formValues: Map<String, String>,
     onFormValue: (String, String) -> Unit,
     aspectRatioOf: (Int) -> Float,
+    ratioVersion: Int,
     renderPage: suspend (Int, Int, Int) -> android.graphics.Bitmap?,
     listState: LazyListState,
     contentPadding: PaddingValues,
@@ -965,7 +1058,13 @@ private fun PageList(
         }
 
         val gestures = if (annotating) {
-            Modifier
+            Modifier.twoFingerPanZoom(
+                onPan = { pan ->
+                    hScroll.dispatchRawDelta(-pan.x)
+                    listState.dispatchRawDelta(-pan.y)
+                },
+                onZoom = { change, centroid -> zoomAround(currentZoom * change, centroid) },
+            )
         } else {
             Modifier
                 .pinchToZoom(enabled = true) { change, centroid -> zoomAround(currentZoom * change, centroid) }
@@ -991,7 +1090,8 @@ private fun PageList(
                         pageIndex = index,
                         pageCount = pageCount,
                         renderWidthPx = ZoomMath.renderWidth(viewportWidthPx, zoom),
-                        aspectRatio = aspectRatioOf(index),
+                        // Re-read when background measuring learns more page shapes (ratioVersion).
+                        aspectRatio = remember(index, ratioVersion) { aspectRatioOf(index) },
                         pageFilter = pageFilter,
                         annotating = annotating,
                         highlighter = highlighter,
@@ -1066,7 +1166,7 @@ private fun PdfPageItem(
             CircularProgressIndicator(Modifier.semantics { contentDescription = "Loading $pageLabel" })
         }
         Canvas(
-            Modifier.matchParentSize().pointerInput(annotating, noteMode, signatureMode) {
+            Modifier.matchParentSize().clipToBounds().pointerInput(annotating, noteMode, signatureMode) {
                 if (!annotating) return@pointerInput
                 if (signatureMode) {
                     detectTapGestures { pos ->
@@ -1081,19 +1181,33 @@ private fun PdfPageItem(
                         onTapNote(NormPoint(pos.x / w, pos.y / h))
                     }
                 } else {
-                    detectDragGestures(
-                        onDragStart = { o -> live.clear(); live.add(o) },
-                        onDrag = { change, _ -> live.add(change.position) },
-                        onDragEnd = {
-                            if (live.size >= 2) {
-                                val w = size.width.toFloat().coerceAtLeast(1f)
-                                val h = size.height.toFloat().coerceAtLeast(1f)
-                                onStroke(live.map { NormPoint(it.x / w, it.y / h) })
+                    // One finger draws; a second finger cancels the stroke and leaves the gesture
+                    // unconsumed, so the list scrolls and pinch-zooms as usual (Xodo/Acrobat style).
+                    // Points are clamped to the page so ink never spills into the gap or next page.
+                    awaitEachGesture {
+                        val w = size.width.toFloat().coerceAtLeast(1f)
+                        val h = size.height.toFloat().coerceAtLeast(1f)
+                        fun clamp(o: Offset) = Offset(o.x.coerceIn(0f, w), o.y.coerceIn(0f, h))
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        live.clear()
+                        live.add(clamp(down.position))
+                        var drawing = true
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            if (event.changes.count { it.pressed } > 1) {
+                                drawing = false
+                                break
                             }
-                            live.clear()
-                        },
-                        onDragCancel = { live.clear() },
-                    )
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!change.pressed) break
+                            live.add(clamp(change.position))
+                            change.consume()
+                        }
+                        if (drawing && live.size >= 2) {
+                            onStroke(live.map { NormPoint(it.x / w, it.y / h) })
+                        }
+                        live.clear()
+                    }
                 }
             },
         ) {
@@ -1204,17 +1318,17 @@ private fun FormBar(fieldCount: Int, saving: Boolean, onSave: () -> Unit) {
     }
 }
 
-private fun shareFilledPdf(context: android.content.Context, path: String, displayName: String) {
+private fun shareFilledPdf(context: android.content.Context, path: String, displayName: String, suffix: String) {
     runCatching {
-        val file = File(path)
+        // Recipients see the file name: "Lease (marked up).pdf", not "signed_1795….pdf". A rename in the
+        // same share folder is instant (no copy on the main thread) and stays under the FileProvider path.
+        val original = File(path)
+        val base = displayName.substringBeforeLast(".").ifBlank { "Document" }
+            .replace(Regex("[\\\\/:*?\"<>|]"), "_")
+        val named = File(original.parentFile, "$base ($suffix).pdf")
+        val file = if (original.renameTo(named)) named else original
         val uri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)
-        val send = Intent(Intent.ACTION_SEND).apply {
-            type = "application/pdf"
-            putExtra(Intent.EXTRA_STREAM, uri)
-            putExtra(Intent.EXTRA_TITLE, displayName)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        context.startActivity(Intent.createChooser(send, "Share filled PDF"))
+        startShare(context, uri, file.name, "Share PDF")
     }
 }
 

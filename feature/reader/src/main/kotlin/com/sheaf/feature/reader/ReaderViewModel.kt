@@ -2,6 +2,7 @@ package com.sheaf.feature.reader
 
 import android.app.Activity
 import android.graphics.Bitmap
+import java.io.File
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -14,6 +15,10 @@ import com.sheaf.core.domain.repository.AnnotationRepository
 import com.sheaf.core.domain.repository.DocumentRepository
 import com.sheaf.core.domain.repository.SettingsRepository
 import com.sheaf.feature.reader.compress.PdfCompressor
+import com.sheaf.feature.reader.annotate.AnnotationHistory
+import com.sheaf.feature.reader.annotate.AnnotationOp
+import com.sheaf.feature.reader.annotate.apply
+import com.sheaf.feature.reader.annotate.revert
 import com.sheaf.feature.reader.flatten.AnnotationFlattener
 import com.sheaf.feature.reader.forms.PdfFormReader
 import com.sheaf.core.data.billing.BillingManager
@@ -75,6 +80,14 @@ class ReaderViewModel @Inject constructor(
     private var pageTextCache: List<String>? = null
     private val tabNames = HashMap<Long, String>()
     private val textMutex = Mutex()
+    // Undo/redo for annotation edits in this session. Edits run one at a time so a fast
+    // undo can never race the insert it is undoing.
+    private val history = AnnotationHistory()
+    private var ratioJob: Job? = null
+    private val _ratioVersion = MutableStateFlow(0)
+    /** Changes when background page measuring learns new page shapes; the page list re-lays out. */
+    val ratioVersion: StateFlow<Int> = _ratioVersion.asStateFlow()
+    private val historyMutex = Mutex()
 
     // Path of the decrypted temp copy for a password-protected document (deleted in onCleared).
     private var unlockedCopy: String? = null
@@ -116,6 +129,8 @@ class ReaderViewModel @Inject constructor(
                 _state.update { it.copy(reflowScale = event.scale.coerceIn(MIN_REFLOW_SCALE, MAX_REFLOW_SCALE)) }
             is ReaderEvent.CloseTab -> viewModelScope.launch { openTabs.close(event.documentId) }
             ReaderEvent.ToggleAnnotate -> _state.update { it.copy(annotating = !it.annotating) }
+            ReaderEvent.Undo -> stepHistory(undo = true)
+            ReaderEvent.Redo -> stepHistory(undo = false)
             is ReaderEvent.SetInkColor -> _state.update { it.copy(inkColorArgb = event.argb) }
             is ReaderEvent.SetHighlighter -> _state.update { it.copy(highlighter = event.on, noteMode = false, signatureMode = false) }
             is ReaderEvent.SetNoteMode -> _state.update { it.copy(noteMode = event.on, signatureMode = false) }
@@ -138,6 +153,7 @@ class ReaderViewModel @Inject constructor(
                 loadPrice()
             }
             ReaderEvent.DismissPaywall -> _state.update { it.copy(showPaywall = false) }
+            ReaderEvent.RestorePurchase -> restorePurchase()
             ReaderEvent.ConsumeBillingMessage -> _state.update { it.copy(billingMessage = null) }
             is ReaderEvent.SubmitOpenPassword -> submitOpenPassword(event.password)
             ReaderEvent.CancelOpenPassword ->
@@ -210,6 +226,8 @@ class ReaderViewModel @Inject constructor(
             }
             source?.close() // release the previous renderer + file descriptor before replacing it
             source = opened
+            ratioJob?.cancel()
+            ratioJob = viewModelScope.launch { opened.ratioVersion.collect { _ratioVersion.value = it } }
             textUri = renderUri
             pageTextCache = null
             runCatching { repository.markOpened(documentId) }
@@ -353,8 +371,14 @@ class ReaderViewModel @Inject constructor(
         if (uri.isBlank() || _state.value.formFields.isEmpty()) return
         viewModelScope.launch {
             _state.update { it.copy(savingForm = true) }
-            val out = runCatching { formReader.fillAndSave(uri, _state.value.formValues) }.getOrNull()
-            _state.update { it.copy(savingForm = false, filledUri = out) }
+            val out = keepProtection(runCatching { formReader.fillAndSave(uri, _state.value.formValues) }.getOrNull())
+            _state.update {
+                it.copy(
+                    savingForm = false,
+                    filledUri = out,
+                    billingMessage = if (out == null) "Couldn't save the filled form" else it.billingMessage,
+                )
+            }
         }
     }
 
@@ -374,6 +398,45 @@ class ReaderViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Outputs made from a password-protected document are built from its unlocked working copy.
+     * Re-apply the document's own password before sharing, so "Share", "Fill" or "Compress" never
+     * hand out a decrypted copy. Returns null (nothing to share) if re-encryption fails.
+     */
+    private suspend fun keepProtection(path: String?): String? {
+        val password = openPassword ?: return path
+        if (path == null) return null
+        val plain = File(path)
+        val encrypted = runCatching { security.encrypt(Uri.fromFile(plain).toString(), password) }.getOrNull()
+        plain.delete()
+        return encrypted
+    }
+
+    /** For a protected source: encrypts [plainPath] with the document password in place, else returns it. */
+    private suspend fun protectedLibraryCopy(plainPath: String): String? {
+        if (openPassword == null) return plainPath
+        val plain = File(plainPath)
+        val encrypted = keepProtection(plainPath) ?: return null // deletes the plaintext
+        val target = File(plain.parentFile, plain.name)
+        return if (File(encrypted).renameTo(target)) target.absolutePath else {
+            File(encrypted).delete()
+            null
+        }
+    }
+
+    private fun restorePurchase() {
+        viewModelScope.launch {
+            val owned = runCatching { billing.restore() }.getOrNull()
+            // When Pro is restored the isPro collector closes the paywall.
+            val message = when (owned) {
+                true -> "Sheaf Pro restored"
+                false -> "No Sheaf Pro purchase found on this Google account"
+                null -> "Couldn't reach Google Play. Try again when you're online."
+            }
+            _state.update { it.copy(billingMessage = message) }
+        }
+    }
+
     fun upgrade(activity: Activity) {
         viewModelScope.launch {
             // purchasePro returns null when the Play purchase flow launches OK, else a short error.
@@ -390,7 +453,13 @@ class ReaderViewModel @Inject constructor(
         viewModelScope.launch {
             _state.update { it.copy(protecting = true) }
             val path = runCatching { security.encrypt(uri, password) }.getOrNull()
-            _state.update { it.copy(protecting = false, protectedPath = path) }
+            _state.update {
+                it.copy(
+                    protecting = false,
+                    protectedPath = path,
+                    billingMessage = if (path == null) "Couldn't protect this PDF" else it.billingMessage,
+                )
+            }
         }
     }
 
@@ -400,8 +469,18 @@ class ReaderViewModel @Inject constructor(
         if (blockedByPaywall()) return
         viewModelScope.launch {
             _state.update { it.copy(compressing = true) }
-            val path = runCatching { compressor.compress(uri) }.getOrNull()
-            _state.update { it.copy(compressing = false, compressedPath = path) }
+            val path = keepProtection(runCatching { compressor.compress(uri) }.getOrNull())
+            _state.update {
+                it.copy(
+                    compressing = false,
+                    compressedPath = path,
+                    billingMessage = if (path == null) {
+                        "Couldn't make this PDF smaller. It may already be optimised."
+                    } else {
+                        it.billingMessage
+                    },
+                )
+            }
         }
     }
 
@@ -411,8 +490,14 @@ class ReaderViewModel @Inject constructor(
         if (uri.isBlank() || ann.isEmpty()) return
         viewModelScope.launch {
             _state.update { it.copy(flattening = true) }
-            val path = runCatching { flattener.flatten(uri, ann) }.getOrNull()
-            _state.update { it.copy(flattening = false, flattenedPath = path) }
+            val path = keepProtection(runCatching { flattener.flatten(uri, ann) }.getOrNull())
+            _state.update {
+                it.copy(
+                    flattening = false,
+                    flattenedPath = path,
+                    billingMessage = if (path == null) "Couldn't create the marked-up copy" else it.billingMessage,
+                )
+            }
         }
     }
 
@@ -422,7 +507,9 @@ class ReaderViewModel @Inject constructor(
         if (blockedByPaywall()) return
         viewModelScope.launch {
             _state.update { it.copy(ocrRunning = true) }
-            val path = runCatching { ocr.makeSearchable(textUri.ifBlank { s.uri }) }.getOrNull()
+            val plainPath = runCatching { ocr.makeSearchable(textUri.ifBlank { s.uri }) }.getOrNull()
+            // OCR reads the unlocked working copy; keep the library copy as protected as its source.
+            val path = plainPath?.let { protectedLibraryCopy(it) }
             if (path == null) {
                 _state.update { it.copy(ocrRunning = false, error = "Couldn't OCR this document") }
                 return@launch
@@ -460,54 +547,100 @@ class ReaderViewModel @Inject constructor(
     fun saveStroke(pageIndex: Int, points: List<NormPoint>) {
         val id = _state.value.documentId ?: return
         if (points.size < 2) return
-        viewModelScope.launch {
-            val hi = _state.value.highlighter
-            annotationRepo.upsert(
-                Annotation(
-                    documentId = id,
-                    pageIndex = pageIndex,
-                    type = if (hi) AnnotationType.Highlight else AnnotationType.Ink,
-                    colorArgb = _state.value.inkColorArgb,
-                    strokeWidth = if (hi) 0.02f else 0.004f,
-                    points = points,
-                ),
-            )
-        }
+        val hi = _state.value.highlighter
+        addAnnotation(
+            Annotation(
+                documentId = id,
+                pageIndex = pageIndex,
+                type = if (hi) AnnotationType.Highlight else AnnotationType.Ink,
+                colorArgb = _state.value.inkColorArgb,
+                strokeWidth = if (hi) 0.02f else 0.004f,
+                points = points,
+            ),
+        )
     }
 
     fun clearPageAnnotations(pageIndex: Int) {
         val id = _state.value.documentId ?: return
-        viewModelScope.launch { annotationRepo.clearPage(id, pageIndex) }
+        edit {
+            // Snapshot from the database inside the edit lock, so a stroke saved a moment ago (not yet
+            // emitted to the UI) is included and comes back on undo.
+            val removed = annotationRepo.observeForDocument(id).first().filter { it.pageIndex == pageIndex }
+            annotationRepo.clearPage(id, pageIndex)
+            AnnotationOp.Removed(removed)
+        }
     }
 
     fun saveNote(pageIndex: Int, point: NormPoint, text: String) {
         val id = _state.value.documentId ?: return
         if (text.isBlank()) return
-        viewModelScope.launch {
-            annotationRepo.upsert(
-                Annotation(
-                    documentId = id,
-                    pageIndex = pageIndex,
-                    type = AnnotationType.Note,
-                    colorArgb = _state.value.inkColorArgb,
-                    strokeWidth = 0f,
-                    points = listOf(point),
-                    note = text.trim(),
-                ),
-            )
-        }
+        addAnnotation(
+            Annotation(
+                documentId = id,
+                pageIndex = pageIndex,
+                type = AnnotationType.Note,
+                colorArgb = _state.value.inkColorArgb,
+                strokeWidth = 0f,
+                points = listOf(point),
+                note = text.trim(),
+            ),
+        )
     }
 
     fun updateNote(annotation: Annotation, text: String) {
-        viewModelScope.launch {
-            if (text.isBlank()) annotationRepo.delete(annotation.id)
-            else annotationRepo.upsert(annotation.copy(note = text.trim()))
+        edit {
+            if (text.isBlank()) {
+                annotationRepo.delete(annotation.id)
+                AnnotationOp.Removed(listOf(annotation))
+            } else {
+                val after = annotation.copy(note = text.trim())
+                if (after == annotation) return@edit null
+                annotationRepo.upsert(after)
+                AnnotationOp.Updated(before = annotation, after = after)
+            }
         }
     }
 
     fun deleteAnnotation(id: Long) {
-        viewModelScope.launch { annotationRepo.delete(id) }
+        val documentId = _state.value.documentId ?: return
+        edit {
+            val target = annotationRepo.observeForDocument(documentId).first().firstOrNull { it.id == id }
+            annotationRepo.delete(id)
+            target?.let { AnnotationOp.Removed(listOf(it)) }
+        }
     }
+
+    private fun addAnnotation(annotation: Annotation) = edit {
+        val newId = annotationRepo.upsert(annotation)
+        AnnotationOp.Added(annotation.copy(id = newId))
+    }
+
+    /** Runs one annotation edit and records it for undo (a null op records nothing). */
+    private fun edit(block: suspend () -> AnnotationOp?) {
+        viewModelScope.launch {
+            historyMutex.withLock {
+                runCatching { block() }.getOrNull()?.let(history::record)
+                publishHistory()
+            }
+        }
+    }
+
+    private fun stepHistory(undo: Boolean) {
+        viewModelScope.launch {
+            historyMutex.withLock {
+                val op = if (undo) history.popUndo() else history.popRedo()
+                if (op != null) {
+                    val ok = runCatching { if (undo) annotationRepo.revert(op) else annotationRepo.apply(op) }.isSuccess
+                    // The database didn't change: put the op back so the stacks still match reality.
+                    if (!ok) { if (undo) history.undoFailed() else history.redoFailed() }
+                }
+                publishHistory()
+            }
+        }
+    }
+
+    private fun publishHistory() =
+        _state.update { it.copy(canUndo = history.canUndo, canRedo = history.canRedo) }
 
     fun saveSignature(points: List<NormPoint>) {
         if (points.size < 2) return
@@ -527,18 +660,16 @@ class ReaderViewModel @Inject constructor(
                 y = (at.y - boxH / 2f + p.y * boxH).coerceIn(0f, 1f),
             )
         }
-        viewModelScope.launch {
-            annotationRepo.upsert(
-                Annotation(
-                    documentId = id,
-                    pageIndex = pageIndex,
-                    type = AnnotationType.Ink,
-                    colorArgb = 0xFF15171C.toInt(),
-                    strokeWidth = 0.003f,
-                    points = mapped,
-                ),
-            )
-        }
+        addAnnotation(
+            Annotation(
+                documentId = id,
+                pageIndex = pageIndex,
+                type = AnnotationType.Ink,
+                colorArgb = 0xFF15171C.toInt(),
+                strokeWidth = 0.003f,
+                points = mapped,
+            ),
+        )
     }
 
     private fun encodePoints(points: List<NormPoint>): String =

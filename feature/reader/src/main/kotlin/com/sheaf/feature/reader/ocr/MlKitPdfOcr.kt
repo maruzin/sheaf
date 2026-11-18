@@ -1,6 +1,7 @@
 package com.sheaf.feature.reader.ocr
 
 import androidx.core.net.toUri
+import com.sheaf.feature.reader.pdf.PageFrame
 import com.sheaf.feature.reader.pdf.PdfBoxMemory
 import android.content.Context
 import android.net.Uri
@@ -16,7 +17,9 @@ import com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode
 import com.tom_roush.pdfbox.rendering.PDFRenderer
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.cancellation.CancellationException
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
@@ -34,21 +37,32 @@ class MlKitPdfOcr @Inject constructor(
     override suspend fun makeSearchable(uri: String): String? = withContext(io) {
         ensureInit()
         val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-        runCatching {
-            val dir = File(context.filesDir, "searchable").apply { mkdirs() }
-            val out = File(dir, "ocr_${System.currentTimeMillis()}.pdf")
+        val dir = File(context.filesDir, "searchable").apply { mkdirs() }
+        val out = File(dir, "ocr_${System.currentTimeMillis()}.pdf")
+        try {
             context.contentResolver.openInputStream(uri.toUri())?.use { input ->
                 PDDocument.load(input, PdfBoxMemory.setting()).use { doc ->
                     val renderer = PDFRenderer(doc)
                     for (i in 0 until doc.numberOfPages) {
+                        // Leaving the reader cancels the job: stop between pages instead of burning
+                        // CPU for minutes on a result nobody will see.
+                        ensureActive()
                         runCatching { ocrPage(doc, renderer, i, recognizer) }
                     }
                     doc.save(out)
                 }
             }
             // Only report success if something was actually written (null stream = unreadable source).
-            out.takeIf { it.length() > 0 }?.absolutePath
-        }.getOrNull()
+            out.takeIf { it.length() > 0 }?.absolutePath ?: run { out.delete(); null }
+        } catch (e: CancellationException) {
+            out.delete()
+            throw e
+        } catch (_: Exception) {
+            out.delete()
+            null
+        } finally {
+            recognizer.close()
+        }
     }
 
     private fun ocrPage(
@@ -59,13 +73,18 @@ class MlKitPdfOcr @Inject constructor(
     ) {
         val page = doc.getPage(index)
         val bitmap = renderer.renderImage(index, RENDER_SCALE) ?: return
-        val result = Tasks.await(recognizer.process(InputImage.fromBitmap(bitmap, 0)))
-        val box = page.mediaBox
-        val pageW = box.width
-        val pageH = box.height
-        if (bitmap.width <= 0 || bitmap.height <= 0) return
-        val sx = pageW / bitmap.width
-        val sy = pageH / bitmap.height
+        val bw = bitmap.width
+        val bh = bitmap.height
+        if (bw <= 0 || bh <= 0) return
+        val result = try {
+            Tasks.await(recognizer.process(InputImage.fromBitmap(bitmap, 0)))
+        } finally {
+            // Recognition is done with the pixels; free them now, not at the next GC (OOM on long scans).
+            bitmap.recycle()
+        }
+        // The rendered bitmap shows the page as displayed (crop box + /Rotate); map through that.
+        val frame = PageFrame.of(page)
+        val sy = frame.displayHeight / bh
         val cs = PDPageContentStream(doc, page, PDPageContentStream.AppendMode.APPEND, true, true)
         runCatching {
             cs.setRenderingMode(RenderingMode.NEITHER)
@@ -75,8 +94,10 @@ class MlKitPdfOcr @Inject constructor(
                     val text = sanitize(line.text)
                     if (text.isBlank()) continue
                     val fontSize = (rect.height() * sy).coerceIn(4f, 72f)
-                    val x = rect.left * sx
-                    val y = pageH - rect.bottom * sy
+                    val (x, y) = frame.toPdf(
+                        rect.left.toFloat() / bw,
+                        rect.bottom.toFloat() / bh,
+                    )
                     runCatching {
                         cs.beginText()
                         cs.setFont(PDType1Font.HELVETICA, fontSize)

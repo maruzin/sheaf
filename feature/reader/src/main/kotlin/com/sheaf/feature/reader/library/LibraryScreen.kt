@@ -1,5 +1,6 @@
 package com.sheaf.feature.reader.library
 
+import com.sheaf.feature.reader.PaywallDialog
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
@@ -153,6 +154,19 @@ fun LibraryScreen(
         }
     }
     var pendingRemove by remember { mutableStateOf<Document?>(null) }
+    var menuOpen by remember { mutableStateOf(false) }
+    val showPaywall by viewModel.showPaywall.collectAsStateWithLifecycle()
+    val proPrice by viewModel.proPrice.collectAsStateWithLifecycle()
+    val isPro by viewModel.isPro.collectAsStateWithLifecycle()
+
+    // Merge: pick several PDFs at once; they are joined in the order the picker returns them.
+    val mergePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            viewModel.merge(uris.map { it.toString() to queryNameAndSize(context, it).first })
+        }
+    }
 
     Scaffold(
         modifier = modifier,
@@ -166,6 +180,20 @@ fun LibraryScreen(
                     }
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Filled.Settings, contentDescription = "Settings")
+                    }
+                    Box {
+                        IconButton(onClick = { menuOpen = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "More options")
+                        }
+                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                            DropdownMenuItem(
+                                text = { Text(if (isPro) "Merge PDFs" else "Merge PDFs  ·  PRO") },
+                                onClick = {
+                                    menuOpen = false
+                                    if (viewModel.requestMerge()) mergePicker.launch(arrayOf("application/pdf"))
+                                },
+                            )
+                        }
                     }
                 },
             )
@@ -220,6 +248,15 @@ fun LibraryScreen(
                 }
             }
         }
+    }
+
+    if (showPaywall) {
+        PaywallDialog(
+            price = proPrice,
+            onDismiss = viewModel::dismissPaywall,
+            onUpgrade = { (context as? Activity)?.let { viewModel.upgrade(it) } },
+            onRestore = viewModel::restorePurchase,
+        )
     }
 
     pendingRemove?.let { doc ->

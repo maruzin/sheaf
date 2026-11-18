@@ -1,6 +1,8 @@
 # Sheaf — Privacy Policy
 
-_Last updated: 24 October 2026_
+_Last updated: 18 November 2026_
+
+Sheaf is published by **Plentrix Ltd** (Ireland), the data controller for this app.
 
 Sheaf ("the app") is a PDF reader and toolkit for Android. This policy explains what the app does and
 does not do with your information. **Sheaf is built to keep your documents on your device.**
@@ -48,4 +50,4 @@ Sheaf is not directed at children under 13 and does not knowingly collect data f
 We may update this policy; the "Last updated" date will change accordingly.
 
 ## Contact
-Questions about this policy: **dean.maruzin@gmail.com**
+Plentrix Ltd, Ireland. Questions about this policy: **dean.maruzin@gmail.com**

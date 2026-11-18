@@ -53,7 +53,7 @@ fun OnboardingScreen(
             )
             Spacer(Modifier.height(36.dp))
             Feature(Icons.Filled.Description, "Read", "Fast viewer with search, outline, and reading themes.")
-            Feature(Icons.Filled.CameraAlt, "Scan", "Turn paper into clean, searchable PDFs.")
+            Feature(Icons.Filled.CameraAlt, "Scan", "Turn paper into clean PDFs. Make them searchable with Pro.")
             Feature(Icons.Filled.Draw, "Annotate & sign", "Highlight, add notes, fill forms, and sign.")
             Spacer(Modifier.weight(1f))
             Button(

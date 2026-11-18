@@ -2,7 +2,9 @@ package com.sheaf.feature.reader
 
 import androidx.lifecycle.ViewModelStore
 import com.sheaf.core.data.billing.BillingManager
+import com.sheaf.core.domain.model.Annotation
 import com.sheaf.core.domain.model.Document
+import com.sheaf.core.domain.model.NormPoint
 import com.sheaf.core.domain.model.OutlineEntry
 import com.sheaf.core.domain.model.ReadingPosition
 import com.sheaf.core.domain.repository.AnnotationRepository
@@ -72,7 +74,10 @@ class ReaderViewModelTest {
     @After
     fun tearDown() = Dispatchers.resetMain()
 
-    private fun viewModel(): ReaderViewModel {
+    private fun viewModel(
+        annotationRepo: AnnotationRepository? = null,
+        compressor: PdfCompressor = mockk(relaxed = true),
+    ): ReaderViewModel {
         val outline = mockk<PdfOutlineExtractor>()
         coEvery { outline.outline(any()) } returns emptyList()
         val forms = mockk<PdfFormReader>()
@@ -84,11 +89,11 @@ class ReaderViewModelTest {
             renderFactory = renderFactory,
             searcher = searcher,
             outlineExtractor = outline,
-            annotationRepo = annotations,
+            annotationRepo = annotationRepo ?: annotations,
             settings = settings,
             formReader = forms,
             security = security,
-            compressor = mockk<PdfCompressor>(relaxed = true),
+            compressor = compressor,
             ocr = mockk<PdfOcr>(relaxed = true),
             billing = mockk<BillingManager>(relaxed = true),
             flattener = mockk<AnnotationFlattener>(relaxed = true),
@@ -117,6 +122,57 @@ class ReaderViewModelTest {
         vm.onEvent(ReaderEvent.Open(1)) // what the screen sends again after a configuration change
         assertEquals(1, renderFactory.opens)
         assertEquals(2, vm.state.value.currentPage)
+    }
+
+    @Test
+    fun `clear page, undo and redo go through the repository with the original ids`() = runTest {
+        val annotations = InMemoryAnnotations()
+        val vm = viewModel(annotationRepo = annotations)
+        vm.onEvent(ReaderEvent.Open(1))
+        val stroke = listOf(NormPoint(0.1f, 0.1f), NormPoint(0.2f, 0.2f))
+        vm.saveStroke(0, stroke)
+        vm.saveStroke(0, stroke)
+        assertEquals(2, annotations.rows.size)
+        assertTrue(vm.state.value.canUndo)
+
+        vm.clearPageAnnotations(0)
+        assertEquals(0, annotations.rows.size)
+
+        vm.onEvent(ReaderEvent.Undo) // restores both strokes
+        assertEquals(setOf(1L, 2L), annotations.rows.keys)
+        assertTrue(vm.state.value.canRedo)
+
+        vm.onEvent(ReaderEvent.Redo) // clears again
+        assertEquals(0, annotations.rows.size)
+
+        vm.onEvent(ReaderEvent.Undo)
+        vm.onEvent(ReaderEvent.Undo) // undoes the second stroke only
+        assertEquals(setOf(1L), annotations.rows.keys)
+        vm.saveStroke(0, stroke) // a new edit drops the redo stack
+        assertFalse(vm.state.value.canRedo)
+    }
+
+    @Test
+    fun `free users hit the paywall for Pro tools and Pro users get through`() = runTest {
+        val compressor = mockk<PdfCompressor>()
+        coEvery { compressor.compress(any()) } returns null
+        val free = viewModel(compressor = compressor)
+        free.onEvent(ReaderEvent.Open(1))
+        free.onEvent(ReaderEvent.Compress)
+        assertTrue(free.state.value.showPaywall)
+        coVerify(exactly = 0) { compressor.compress(any()) }
+
+        coEvery { settings.isPro } returns flowOf(true)
+        val pro = viewModel(compressor = compressor)
+        pro.onEvent(ReaderEvent.Open(1))
+        pro.onEvent(ReaderEvent.Compress)
+        assertFalse(pro.state.value.showPaywall)
+        coVerify(exactly = 1) { compressor.compress(any()) }
+        // A failed or non-shrinking compression tells the user instead of doing nothing.
+        assertEquals(
+            "Couldn't make this PDF smaller. It may already be optimised.",
+            pro.state.value.billingMessage,
+        )
     }
 
     @Test
@@ -340,4 +396,23 @@ private class FakeTabs : OpenTabsRepository {
     override val tabs = ids
     override suspend fun open(documentId: Long) { ids.value = OpenTabs.open(ids.value, documentId) }
     override suspend fun close(documentId: Long) { ids.value = OpenTabs.close(ids.value, documentId) }
+}
+
+/** Room-like: id 0 gets the next id, an explicit id is (re)inserted under that id. */
+private class InMemoryAnnotations : AnnotationRepository {
+    val rows = sortedMapOf<Long, Annotation>()
+    private val flow = MutableStateFlow<List<Annotation>>(emptyList())
+    private var nextId = 1L
+    override fun observeForDocument(documentId: Long) = flow
+    override suspend fun upsert(annotation: Annotation): Long {
+        val id = if (annotation.id == 0L) nextId++ else annotation.id
+        rows[id] = annotation.copy(id = id)
+        flow.value = rows.values.toList()
+        return id
+    }
+    override suspend fun delete(id: Long) { rows.remove(id); flow.value = rows.values.toList() }
+    override suspend fun clearPage(documentId: Long, pageIndex: Int) {
+        rows.values.removeAll { it.pageIndex == pageIndex }
+        flow.value = rows.values.toList()
+    }
 }

@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -40,7 +41,7 @@ internal fun ReaderTabsRow(
     }
     LazyRow(
         state = listState,
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().testTag(TABS_ROW_TAG),
         contentPadding = PaddingValues(horizontal = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -72,3 +73,6 @@ internal fun ReaderTabsRow(
         }
     }
 }
+
+/** Test tag of the tab strip (it scrolls; UI tests scroll it to a tab before tapping). */
+const val TABS_ROW_TAG = "reader-tabs"

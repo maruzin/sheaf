@@ -1,6 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Only the folders Sheaf actually shares from. Never "." : that would expose the settings
+     DataStore, the library database and the decrypted copies in cache/unlocked. -->
 <paths>
-    <cache-path name="cache" path="." />
-    <files-path name="files" path="." />
-    <external-cache-path name="external_cache" path="." />
+    <!-- Share-only outputs: filled forms, protected, compressed and marked-up copies. -->
+    <cache-path name="share" path="share/" />
+    <cache-path name="compressed" path="compressed/" />
+    <cache-path name="signed" path="signed/" />
+    <!-- Library documents Sheaf owns (shared from the reader's Share button). -->
+    <files-path name="opened" path="opened/" />
+    <files-path name="scanned" path="scanned/" />
+    <files-path name="edited" path="edited/" />
+    <files-path name="searchable" path="searchable/" />
 </paths>

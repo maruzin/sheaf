@@ -6,12 +6,24 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performScrollToNode
+import com.sheaf.feature.reader.TABS_ROW_TAG
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipe
+import androidx.compose.ui.geometry.Offset
+import androidx.core.content.FileProvider
+import org.junit.Assert.assertEquals
+import org.junit.Assert.fail
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
@@ -127,14 +139,19 @@ class ReaderEndToEndTest {
 
     @Test
     fun tabsSwitchBetweenOpenDocuments() {
-        val first = TestPdfs.plain(context, "e2e-tab-one.pdf", pages = 2)
-        val second = TestPdfs.plain(context, "e2e-tab-two.pdf", pages = 1)
+        // Unique names: the test must also pass on a device that already has tabs open (the strip
+        // scrolls, and earlier runs leave their own e2e documents behind).
+        val run = System.currentTimeMillis()
+        val firstName = "e2e-tab-one-$run"
+        val first = TestPdfs.plain(context, "$firstName.pdf", pages = 2)
+        val second = TestPdfs.plain(context, "e2e-tab-two-$run.pdf", pages = 1)
         launchWith(first).use { waitForDescription("Page 1 of 2") }
         launchWith(second).use {
             waitForDescription("Page 1 of 1")
-            // Both documents are open as tabs; switch back to the first.
-            waitForText("e2e-tab-one")
-            compose.onNodeWithText("e2e-tab-one").performClick()
+            // Both documents are open as tabs; scroll the strip to the first and switch back to it.
+            compose.waitUntilAtLeastOneExists(hasTestTag(TABS_ROW_TAG), timeout)
+            compose.onNodeWithTag(TABS_ROW_TAG).performScrollToNode(hasText(firstName))
+            compose.onNodeWithText(firstName).performClick()
             waitForDescription("Page 1 of 2")
         }
     }
@@ -153,6 +170,109 @@ class ReaderEndToEndTest {
             compose.onNodeWithText("Remove from library").performClick()
             compose.onNodeWithText("Remove").performClick()
             compose.waitUntilDoesNotExist(hasText(pdf.name), timeout)
+        }
+    }
+
+    @Test
+    fun drawThenUndoAndRedo() {
+        val pdf = TestPdfs.plain(context, "e2e-undo.pdf", pages = 1)
+        launchWith(pdf).use {
+            waitForDescription("Page 1 of 1")
+            compose.onNodeWithContentDescription("Annotate").performClick()
+            waitForDescription("Undo")
+            compose.onNodeWithContentDescription("Undo").assertIsNotEnabled()
+
+            // Draw one pen stroke across the page.
+            compose.onNodeWithContentDescription("Page 1 of 1").performTouchInput {
+                swipe(Offset(width * 0.2f, height * 0.3f), Offset(width * 0.8f, height * 0.4f), 400)
+            }
+            compose.waitUntil(timeout) {
+                runCatching { compose.onNodeWithContentDescription("Undo").assertIsEnabled() }.isSuccess
+            }
+
+            compose.onNodeWithContentDescription("Undo").performClick()
+            compose.waitUntil(timeout) {
+                runCatching { compose.onNodeWithContentDescription("Redo").assertIsEnabled() }.isSuccess
+            }
+            compose.onNodeWithContentDescription("Undo").assertIsNotEnabled()
+
+            compose.onNodeWithContentDescription("Redo").performClick()
+            compose.waitUntil(timeout) {
+                runCatching { compose.onNodeWithContentDescription("Undo").assertIsEnabled() }.isSuccess
+            }
+            compose.onNodeWithContentDescription("Redo").assertIsNotEnabled()
+        }
+    }
+
+    @Test
+    fun mergeIsProAndShowsThePaywallWithRestore() {
+        val pdf = TestPdfs.plain(context, "e2e-merge.pdf", pages = 1)
+        launchWith(pdf).use {
+            waitForDescription("Page 1 of 1")
+            compose.onNodeWithContentDescription("Back").performClick()
+            skipOnboardingIfShown()
+            waitForDescription("Open PDF")
+            compose.onNodeWithContentDescription("More options").performClick()
+            compose.onNodeWithText("Merge PDFs", substring = true).performClick()
+            waitForText("Sheaf Pro")
+            compose.onNodeWithText("Merge PDFs", substring = true).assertExists()
+            compose.onNodeWithText("Already bought? Restore").assertExists()
+            compose.onNodeWithText("Not now").performClick()
+            compose.waitUntilDoesNotExist(hasText("Already bought? Restore"), timeout)
+        }
+    }
+
+    @Test
+    fun fileProviderSharesOnlySheafOutputFolders() {
+        val authority = context.packageName + ".fileprovider"
+        // Library copies and share outputs can be handed to other apps...
+        for (path in listOf("opened/a.pdf", "scanned/b.pdf", "edited/c.pdf", "searchable/d.pdf")) {
+            val uri = FileProvider.getUriForFile(context, authority, File(context.filesDir, path))
+            assertEquals("content", uri.scheme)
+        }
+        for (path in listOf("share/e.pdf", "compressed/f.pdf", "signed/g.pdf")) {
+            FileProvider.getUriForFile(context, authority, File(context.cacheDir, path))
+        }
+        // ...but never settings, the library database or decrypted copies.
+        val private = listOf(
+            File(context.filesDir, "datastore/settings.preferences_pb"),
+            context.getDatabasePath("sheaf.db"),
+            File(context.cacheDir, "unlocked/x.pdf"),
+        )
+        for (file in private) {
+            try {
+                FileProvider.getUriForFile(context, authority, file)
+                fail("FileProvider must not expose $file")
+            } catch (expected: IllegalArgumentException) {
+                // ok
+            }
+        }
+    }
+
+    @Test
+    fun twoFingerDragInPenModeScrollsInsteadOfDrawing() {
+        val pdf = TestPdfs.plain(context, "e2e-twofinger.pdf", pages = 3)
+        launchWith(pdf).use {
+            waitForDescription("Page 1 of 3")
+            compose.onNodeWithContentDescription("Annotate").performClick()
+            waitForDescription("Undo")
+            compose.onNodeWithContentDescription("Page 1 of 3").performTouchInput {
+                down(0, Offset(width * 0.4f, height * 0.8f))
+                down(1, Offset(width * 0.6f, height * 0.8f))
+                repeat(20) {
+                    moveBy(0, Offset(0f, -height * 0.08f))
+                    moveBy(1, Offset(0f, -height * 0.08f))
+                }
+                up(0)
+                up(1)
+            }
+            compose.waitForIdle()
+            // No stroke was recorded: two fingers are for scrolling/zooming, not ink...
+            compose.onNodeWithContentDescription("Undo").assertIsNotEnabled()
+            // ...and the document actually scrolled past page 1.
+            compose.waitUntil(timeout) {
+                compose.onAllNodesWithText("1 / 3").fetchSemanticsNodes().isEmpty()
+            }
         }
     }
 }

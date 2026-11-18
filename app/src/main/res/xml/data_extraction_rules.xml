@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Android 12+: back up / transfer only settings (DataStore: theme, signature, onboarding).
+<!-- Android 12+: back up / transfer only settings (DataStore: theme, onboarding, Pro flag).
+     The handwritten signature is kept in noBackupFilesDir and never leaves the device.
      Documents and the library database are excluded: PDFs can exceed the 25 MB backup quota (which
      disables backup entirely) and restored rows would point at files that weren't restored. -->
 <data-extraction-rules>

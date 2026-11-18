@@ -3,6 +3,8 @@ package com.sheaf.app
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import androidx.compose.ui.platform.LocalContext
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -33,7 +35,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        incomingUri.value = incomingPdfUri(intent)
+        // A recreated activity (rotation, process restore) still carries the original "Open with"
+        // intent. It was already handled, so reading it again would import and open the file twice.
+        if (savedInstanceState == null) incomingUri.value = incomingPdfUri(intent)
         setContent {
             val uri by incomingUri
             SheafApp(incomingUri = uri)
@@ -86,6 +90,14 @@ private fun SheafApp(incomingUri: String? = null, appViewModel: AppViewModel = h
                 startDestination = startDestination,
                 modifier = Modifier.fillMaxSize(),
             )
+            val openError by appViewModel.openError.collectAsStateWithLifecycle()
+            val context = LocalContext.current
+            LaunchedEffect(openError) {
+                openError?.let {
+                    Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+                    appViewModel.consumeOpenError()
+                }
+            }
             val pendingOpen by appViewModel.pendingOpenDoc.collectAsStateWithLifecycle()
             LaunchedEffect(pendingOpen) {
                 pendingOpen?.let { id ->

@@ -15,7 +15,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sheaf.core.domain.model.Document
 import com.sheaf.core.domain.repository.DocumentRepository
+import com.sheaf.core.data.billing.BillingManager
+import com.sheaf.core.domain.repository.SettingsRepository
+import com.sheaf.feature.reader.merge.MergeResult
+import com.sheaf.feature.reader.merge.PdfMerger
 import com.sheaf.feature.reader.render.PdfRenderSourceFactory
+import android.app.Activity
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -38,7 +43,80 @@ class LibraryViewModel @Inject constructor(
     private val renderFactory: PdfRenderSourceFactory,
     private val openTabs: OpenTabsRepository,
     @ApplicationContext private val context: Context,
+    private val merger: PdfMerger,
+    private val settings: SettingsRepository,
+    private val billing: BillingManager,
 ) : ViewModel() {
+
+    // --- Pro: merge PDFs -------------------------------------------------------------------------
+    val isPro: StateFlow<Boolean> =
+        settings.isPro.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    private val _showPaywall = MutableStateFlow(false)
+    val showPaywall: StateFlow<Boolean> = _showPaywall.asStateFlow()
+    private val _proPrice = MutableStateFlow<String?>(null)
+    val proPrice: StateFlow<String?> = _proPrice.asStateFlow()
+
+    /** True if the merge picker may open; otherwise raises the paywall. */
+    fun requestMerge(): Boolean {
+        if (isPro.value) return true
+        _showPaywall.value = true
+        viewModelScope.launch { _proPrice.value = runCatching { billing.proPrice() }.getOrNull() }
+        return false
+    }
+
+    fun dismissPaywall() { _showPaywall.value = false }
+
+    fun upgrade(activity: Activity) {
+        viewModelScope.launch {
+            val error = runCatching { billing.purchasePro(activity) }.getOrElse { "Couldn't start the purchase" }
+            if (error != null) _error.value = error
+        }
+    }
+
+    fun restorePurchase() {
+        viewModelScope.launch {
+            _error.value = when (runCatching { billing.restore() }.getOrNull()) {
+                true -> { _showPaywall.value = false; "Sheaf Pro restored" }
+                false -> "No Sheaf Pro purchase found on this Google account"
+                null -> "Couldn't reach Google Play. Try again when you're online."
+            }
+        }
+    }
+
+    /** Merges the picked PDFs, in pick order, into a new library document and opens it. */
+    fun merge(files: List<Pair<String, String>>) {
+        if (!isPro.value) { _showPaywall.value = true; return }
+        if (files.size < 2) { _error.value = "Pick at least two PDFs to merge"; return }
+        viewModelScope.launch {
+            _busy.value = true
+            _error.value = null
+            when (val result = runCatching { merger.merge(files.map { it.first }) }.getOrElse { MergeResult.Failed }) {
+                is MergeResult.Success -> {
+                    val file = File(result.path)
+                    val id = runCatching {
+                        repository.upsert(
+                            Document(
+                                id = 0,
+                                uri = Uri.fromFile(file).toString(),
+                                displayName = mergedName(files.map { it.second }),
+                                sizeBytes = file.length(),
+                                pageCount = result.pageCount,
+                                lastOpenedAt = System.currentTimeMillis(),
+                                addedAt = System.currentTimeMillis(),
+                            ),
+                        )
+                    }.getOrNull()
+                    if (id != null) _openDocument.value = id else _error.value = "Couldn't save the merged PDF"
+                }
+                is MergeResult.Protected ->
+                    _error.value = "\"${files[result.index].second}\" is password-protected. Remove its password first."
+                is MergeResult.Unreadable ->
+                    _error.value = "Couldn't read \"${files[result.index].second}\". It may be damaged."
+                MergeResult.Failed -> _error.value = "Couldn't merge those PDFs"
+            }
+            _busy.value = false
+        }
+    }
 
     // Bounded by bytes (1/16 of the heap) so a big library can't exhaust memory with thumbnails.
     private val thumbs = object : LruCache<String, Bitmap>(
@@ -167,6 +245,13 @@ class LibraryViewModel @Inject constructor(
     fun toggleBookmark(document: Document) {
         viewModelScope.launch { repository.setBookmarked(document.id, !document.isBookmarked) }
     }
+}
+
+/** "First.pdf + 2 more.pdf": recognisable in the library without being a mile long. */
+internal fun mergedName(names: List<String>): String {
+    val first = names.firstOrNull()?.substringBeforeLast(".")?.ifBlank { null } ?: "Merged"
+    val rest = names.size - 1
+    return if (rest > 0) "$first + $rest more (merged).pdf" else "$first (merged).pdf"
 }
 
 /**

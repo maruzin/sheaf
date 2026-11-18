@@ -4,6 +4,93 @@ Running engineering log. Newest first. Every non-obvious decision gets one line 
 
 ---
 
+## Release 1.1.0 (versionCode 4), 2026-11-18: all audit findings fixed, full device + UX testing
+Verified on this Mac: `assembleDebug`, `testDebugUnitTest` **64/64**, strict `lintDebug` (0), `bundleRelease`
+(R8), and `connectedDebugAndroidTest` **8/8 on an Android 15 emulator** (Pixel 7 AVD, arm64). Plus a manual
+visual + accessibility pass on the emulator (onboarding, library, reader, annotate, menus, paywall, settings,
+Manage pages, share sheet; dark mode; 200% font; 2560x1600 tablet), with a UI-tree scan for unlabelled
+controls and sub-48dp targets.
+
+**Fixed (second audit round + independent review of the diff)**
+- Markup, form overlays and the OCR layer now map through the **crop box and /Rotate** (`pdf/PageFrame`,
+  unit-tested for all four rotations). Signatures on rotated or cropped pages landed in the wrong place.
+- **Manage pages writes a fresh document**: deleted pages can't survive via bookmarks, links or form
+  fields (tested by scanning every stream in the output). Forms are flattened, bookmarks and internal links
+  re-pointed to kept pages, annotations carried over to the copy (rotated with the page), owner-restricted
+  sources save fine.
+- Fill / compress / share-with-markup / OCR outputs of a **password-protected** PDF keep its password.
+- Pen mode: **two fingers pan and zoom** (dedicated Initial-pass detector), one finger draws, ink is
+  clamped to its page. Device test proves a two-finger drag scrolls and leaves no ink.
+- Undo snapshots come from the database inside the edit lock; a failed undo/redo restores the stacks.
+- Long PDFs: first 150 page shapes measured at open, the rest in the background with a layout refresh
+  (`ratioVersion`); renderer released safely if closed mid-batch.
+- FileProvider limited to the share folders (device-tested: settings, DB and decrypted copies refused).
+  `file://` links into Sheaf's private data refused and read via the checked canonical path. "Open with"
+  failures now show a message. Signature moved to a no-backup DataStore (migrated). Atomic document delete.
+  Form field lookup is one pass. OCR recycles bitmaps.
+- **Share works with other apps, verified cross-app on the emulator** (Android Print service, a separate
+  app, rendered every shared file): Sheaf-owned documents, "Share with markup" (ink on a rotated page lands in
+  the same place, checked by round-trip) and documents picked with the system picker. The last one was
+  broken: re-granting a picker `content://` link failed with "Permission Denial" and the receiver got a
+  blank file. Every share now goes through Sheaf's FileProvider (copied to cache/share under the library
+  name, grant attached as ClipData). Outputs are named "<doc> (marked up / filled / protected /
+  compressed).pdf" instead of internal file names.
+- Device tests made state-independent (unique names, tab strip scrolled to the tab); the suite passes on a
+  fresh install and twice in a row on a device full of stale tabs and documents.
+- UX: reader title ellipsis; Settings switch has an accessible name and 48dp theme rows; Settings and the
+  Pro dialog scroll at large font sizes; owned files share under their library name; paywall says
+  "price shown at checkout" when Play can't be reached.
+
+**Play compliance (checked against official Google pages, 2026-11-18)**: API 36, Billing 8.3, 16 KB pages,
+edge-to-edge, predictive back, permissions, backup rules all pass. Fixed: onboarding no longer implies free
+searchable scans; listing says "no tracking" (ML Kit sends diagnostics); two-pane claim matches the 840dp
+breakpoint; privacy policy names Plentrix Ltd. Owner tasks are in `docs/PLAY_CONSOLE_GUIDE.md`.
+
+**Still not covered here**: Android 10 (API 29) device run (CI `device-tests.yml` runs it on push); a real
+phone; a real Play purchase/restore with a licence tester; Free/Pro split decision.
+
+> Verification 2026-11-18: claims checked 9 (state 7, external 2). Test counts recounted from the raw JUnit
+> XML (64 unit / 8 device, 0 failures); lint reports "No issues found" in all 5 modules; versionCode 4 /
+> 1.1.0 re-read from the convention plugin; release AAB built (unsigned: 0 signature entries); diff scanned
+> for secrets (none). Play requirement dates come from the compliance audit's official Google URLs
+> (listed in docs/PLAY_CONSOLE_GUIDE.md), not re-opened by the author. Not verified: API 29 device run,
+> physical phone, live purchase.
+
+## Score-97 pass (2026-11-18): undo/redo, merge, audit fixes
+Built on the green draft PR #1 branch. Verified locally (JDK 21 from Android Studio, SDK 36):
+`assembleDebug`, `testDebugUnitTest` (54 tests, was 45), strict `lintDebug` (0 issues), `bundleRelease` (R8).
+
+**New**
+- **Undo / redo for annotations** (`annotate/AnnotationHistory`): strokes, highlights, notes, note edits,
+  deletes, signature stamps and "Clear page". Ops keep full snapshots; Room's upsert re-inserts a deleted
+  row under its original id, so redo/undo never chase new ids. Edits are serialised with a Mutex so a
+  fast undo can't race its insert. 50-step cap. Buttons lead the ink toolbar.
+- **Merge PDFs (Pro)** from the library overflow menu (`merge/PdfBoxMerger`, PdfBox `PDFMergerUtility`,
+  mixed RAM/disk memory). Names the protected or unreadable input; never leaves a partial file.
+- **Paywall restore button**, in the reader and the library.
+
+**Fixed (from an independent code audit, each confirmed in code)**
+- Share did nothing for Sheaf-owned `file://` documents (scans, "Open with", OCR, edited copies):
+  `FileUriExposedException` was swallowed. Now served through the FileProvider.
+- Rotation / process restore re-imported and re-opened the "Open with" file (launch intent re-read).
+- `ITEM_ALREADY_OWNED` left owners stuck at the paywall. Now triggers a restore.
+- `PdfRenderer` failure (corrupt / protected file) leaked the file descriptor on every import and retry.
+- OCR couldn't be cancelled, never closed the ML Kit recognizer, and left orphan `ocr_*.pdf` files.
+- A corrupt preferences file crashed every settings collector (reader included). Reads now fall back
+  to defaults on IOException.
+- Compression re-encoded shared images once per page, never recycled bitmaps, and shared outputs that
+  were larger than the input. Now dedupes by COS object, recycles, and only returns a smaller file.
+- Fill / protect / compress failures were silent. They now show a message.
+- Share-only outputs in cacheDir (decrypted plaintext for protected sources) are purged after 1 hour.
+
+**Open (next)**
+- Flattener / form overlay / OCR layer map to `mediaBox` and ignore `/Rotate` and `cropBox`: markup on
+  rotated or cropped pages lands in the wrong place. Needs a transform + a `/Rotate 90` test.
+- Free/Pro split differs from the original Spec (pages, signatures, scans are free; one-time Pro, not a
+  subscription). The listing matches the code. Product decision before the Play listing goes live.
+- Opening a long PDF measures every page up front; FileProvider exposes all of files/ and cache/;
+  document delete isn't one transaction.
+
 ## Top-5% pass (2026-10-24): features, bugs, a11y, perf, strict lint, tests
 **New**
 - **Real zoom:** pages lay out zoom x wider with horizontal pan. Pinch runs on the Initial pointer

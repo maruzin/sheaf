@@ -1,6 +1,7 @@
 package com.sheaf.feature.reader
 
 import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculateZoom
@@ -86,6 +87,34 @@ internal fun Modifier.pinchToZoom(
                     }
                 } while (event.changes.any { it.pressed })
             }
+        }
+    }
+}
+
+/**
+ * Annotate mode: one finger draws, two fingers pan and zoom. Runs on the Initial pass and drives the
+ * scroll states directly, so it works even though the drawing layer consumes one-finger moves (the
+ * list's own drag detector gives up once it has seen a consumed change).
+ */
+internal fun Modifier.twoFingerPanZoom(
+    onPan: (pan: Offset) -> Unit,
+    onZoom: (zoomChange: Float, centroid: Offset) -> Unit,
+): Modifier = composed {
+    val pan by rememberUpdatedState(onPan)
+    val zoom by rememberUpdatedState(onZoom)
+    pointerInput(Unit) {
+        awaitEachGesture {
+            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            do {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                if (event.changes.count { it.pressed } >= 2) {
+                    val zoomChange = event.calculateZoom()
+                    if (zoomChange != 1f) zoom(zoomChange, event.calculateCentroid(useCurrent = true))
+                    val panChange = event.calculatePan()
+                    if (panChange != Offset.Zero) pan(panChange)
+                    event.changes.forEach { if (it.positionChanged()) it.consume() }
+                }
+            } while (event.changes.any { it.pressed })
         }
     }
 }

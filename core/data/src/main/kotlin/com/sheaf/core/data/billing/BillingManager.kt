@@ -39,8 +39,14 @@ class BillingManager @Inject constructor(
     @Volatile private var connected = false
 
     private val purchasesListener = PurchasesUpdatedListener { result, purchases ->
-        if (result.responseCode == BillingClient.BillingResponseCode.OK && purchases != null) {
-            scope.launch { purchases.forEach { handlePurchase(it) } }
+        when (result.responseCode) {
+            BillingClient.BillingResponseCode.OK ->
+                if (purchases != null) scope.launch { purchases.forEach { handlePurchase(it) } }
+            // Play says the user already owns Pro (e.g. the launch-time restore failed offline):
+            // re-sync instead of leaving them stuck behind the paywall.
+            BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED ->
+                scope.launch { runCatching { restore() } }
+            else -> Unit
         }
     }
 

@@ -32,6 +32,8 @@ class PdfBoxCompressor @Inject constructor(
             val out = File(dir, "compressed_${System.currentTimeMillis()}.pdf")
             context.contentResolver.openInputStream(uri.toUri())?.use { input ->
                 PDDocument.load(input, PdfBoxMemory.setting()).use { doc ->
+                    // An image shared by many pages is re-encoded once, not once per page.
+                    val done = HashMap<Any, PDImageXObject?>()
                     for (page in doc.pages) {
                         val res = page.resources ?: continue
                         val names = res.xObjectNames?.toList() ?: continue
@@ -39,16 +41,28 @@ class PdfBoxCompressor @Inject constructor(
                             runCatching {
                                 val xobj = res.getXObject(name)
                                 if (xobj is PDImageXObject) {
+                                    val key: Any = xobj.cosObject
+                                    if (done.containsKey(key)) {
+                                        done[key]?.let { res.put(name, it) }
+                                        return@runCatching
+                                    }
+                                    done[key] = null
                                     val bmp = xobj.image ?: return@runCatching
                                     val longest = max(bmp.width, bmp.height)
                                     // Only touch large, opaque images: re-encoding small ones can inflate
                                     // size, and JPEG would flatten transparency (e.g. logos -> black boxes).
-                                    if (longest <= MAX_DIM || bmp.hasAlpha()) return@runCatching
+                                    if (longest <= MAX_DIM || bmp.hasAlpha()) {
+                                        bmp.recycle()
+                                        return@runCatching
+                                    }
                                     val scale = MAX_DIM.toFloat() / longest
                                     val nw = (bmp.width * scale).roundToInt().coerceAtLeast(1)
                                     val nh = (bmp.height * scale).roundToInt().coerceAtLeast(1)
                                     val scaled = bmp.scale(nw, nh, true)
                                     val newImage = JPEGFactory.createFromImage(doc, scaled, JPEG_QUALITY)
+                                    if (scaled !== bmp) scaled.recycle()
+                                    bmp.recycle()
+                                    done[key] = newImage
                                     res.put(name, newImage)
                                 }
                             }
@@ -57,8 +71,12 @@ class PdfBoxCompressor @Inject constructor(
                     doc.save(out)
                 }
             }
-            // Only report success if something was actually written (null stream = unreadable source).
-            out.takeIf { it.length() > 0 }?.absolutePath
+            // Only report success for a file that was written and is actually smaller.
+            val original = runCatching {
+                context.contentResolver.openAssetFileDescriptor(uri.toUri(), "r")?.use { it.length }
+            }.getOrNull() ?: -1L
+            val smaller = out.length() > 0 && (original <= 0 || out.length() < original)
+            if (smaller) out.absolutePath else { out.delete(); null }
         }.getOrNull()
     }
 

@@ -1,6 +1,7 @@
 package com.sheaf.feature.reader.forms
 
 import androidx.core.net.toUri
+import com.sheaf.feature.reader.pdf.PageFrame
 import com.sheaf.feature.reader.pdf.PdfBoxMemory
 import android.content.Context
 import android.net.Uri
@@ -9,7 +10,6 @@ import com.sheaf.core.domain.model.FormFieldType
 import com.sheaf.core.domain.model.NormRect
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
-import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.interactive.form.PDCheckBox
 import com.tom_roush.pdfbox.pdmodel.interactive.form.PDChoice
 import com.tom_roush.pdfbox.pdmodel.interactive.form.PDField
@@ -34,20 +34,26 @@ class PdfBoxFormReader @Inject constructor(
                 PDDocument.load(input, PdfBoxMemory.setting()).use { doc ->
                     val acro = doc.documentCatalog?.acroForm ?: return@use
                     val pages = doc.pages.toList()
+                    // One pass over the pages: widget -> page index. The old per-field scan of every
+                    // page's annotations was O(fields x pages x annotations) on big forms.
+                    val pageOfWidget = HashMap<Any, Int>()
+                    pages.forEachIndexed { i, page ->
+                        runCatching { page.annotations }.getOrNull()?.forEach { pageOfWidget[it.cosObject] = i }
+                    }
                     for (field in acro.fieldTree) {
                         if (field.widgets.isEmpty()) continue
                         val widget = field.widgets.first()
                         val rect = widget.rectangle ?: continue
-                        val pageIndex = pages.indexOfFirst { pageHasWidget(it, widget.cosObject) }
+                        val pageIndex = pageOfWidget[widget.cosObject]
+                            ?: widget.page?.let { p -> pages.indexOfFirst { it.cosObject === p.cosObject } }
+                            ?: continue
                         if (pageIndex < 0) continue
-                        val page = pages[pageIndex]
-                        val box = page.mediaBox
-                        val pw = box.width.takeIf { it > 0 } ?: continue
-                        val ph = box.height.takeIf { it > 0 } ?: continue
-                        val nx = (rect.lowerLeftX - box.lowerLeftX) / pw
-                        val ny = 1f - (rect.upperRightY - box.lowerLeftY) / ph
-                        val nw = rect.width / pw
-                        val nh = rect.height / ph
+                        val frame = PageFrame.of(pages[pageIndex])
+                        if (frame.width <= 0f || frame.height <= 0f) continue
+                        // Display space (crop box + /Rotate), matching the rendered page under the overlay.
+                        val (nx, ny, nw, nh) = frame.rectToDisplay(
+                            rect.lowerLeftX, rect.lowerLeftY, rect.upperRightX, rect.upperRightY,
+                        )
                         val fqn = field.fullyQualifiedName ?: continue
                         out += FormField(
                             name = fqn,
@@ -67,7 +73,7 @@ class PdfBoxFormReader @Inject constructor(
     override suspend fun fillAndSave(uri: String, values: Map<String, String>): String? = withContext(io) {
         ensureInit()
         runCatching {
-            val out = File(context.cacheDir, "filled_${System.currentTimeMillis()}.pdf")
+            val out = File(File(context.cacheDir, "share").apply { mkdirs() }, "filled_${System.currentTimeMillis()}.pdf")
             context.contentResolver.openInputStream(uri.toUri())?.use { input ->
                 PDDocument.load(input, PdfBoxMemory.setting()).use { doc ->
                     val acro = doc.documentCatalog?.acroForm ?: return@withContext null
@@ -89,9 +95,6 @@ class PdfBoxFormReader @Inject constructor(
             out.takeIf { it.length() > 0 }?.absolutePath
         }.getOrNull()
     }
-
-    private fun pageHasWidget(page: PDPage, widgetCos: Any): Boolean =
-        runCatching { page.annotations.any { it.cosObject == widgetCos } }.getOrDefault(false)
 
     private fun typeOf(field: PDField): FormFieldType = when (field) {
         is PDTextField -> FormFieldType.Text

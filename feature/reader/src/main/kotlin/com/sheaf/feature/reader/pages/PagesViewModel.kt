@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sheaf.core.domain.model.Document
+import com.sheaf.core.domain.repository.AnnotationRepository
 import com.sheaf.core.domain.repository.DocumentRepository
 import com.sheaf.feature.reader.render.PdfRenderSource
 import com.sheaf.feature.reader.render.PdfRenderSourceFactory
@@ -12,6 +13,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
@@ -22,6 +24,7 @@ class PagesViewModel @Inject constructor(
     private val repository: DocumentRepository,
     private val renderFactory: PdfRenderSourceFactory,
     private val editor: PdfPageEditor,
+    private val annotations: AnnotationRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(PagesUiState())
@@ -93,7 +96,21 @@ class PagesViewModel @Inject constructor(
                     ),
                 )
             }.getOrNull()
-            _state.update { it.copy(saving = false, savedDocumentId = newId) }
+            // Bring the user's ink, highlights and notes along to the edited copy.
+            val sourceId = s.documentId
+            if (newId != null && sourceId != null) {
+                runCatching {
+                    val existing = annotations.observeForDocument(sourceId).first()
+                    AnnotationRemap.remap(existing, s.items, newId).forEach { annotations.upsert(it) }
+                }
+            }
+            _state.update {
+                it.copy(
+                    saving = false,
+                    savedDocumentId = newId,
+                    error = if (newId == null) "Couldn't add the edited PDF to your library" else it.error,
+                )
+            }
         }
     }
 

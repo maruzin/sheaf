@@ -50,16 +50,31 @@ class AppViewModel @Inject constructor(
     val pendingOpenDoc: StateFlow<Long?> = _pendingOpenDoc.asStateFlow()
     fun consumePendingOpen() { _pendingOpenDoc.value = null }
 
+    /** One-shot message when an "Open with" file couldn't be imported. */
+    private val _openError = MutableStateFlow<String?>(null)
+    val openError: StateFlow<String?> = _openError.asStateFlow()
+    fun consumeOpenError() { _openError.value = null }
+
     /** Copies an externally-opened PDF into app storage, indexes it, and requests opening it. */
     fun openIncoming(uriString: String) {
         viewModelScope.launch {
             val id = withContext(Dispatchers.IO) {
                 runCatching {
                     val src = uriString.toUri()
+                    // Another app could point a file:// link at Sheaf's own private storage
+                    // (settings, database, decrypted copies) to get it copied into the library.
+                    // Open file:// links through the canonical path that was checked, so a symlink
+                    // swapped in afterwards can't redirect the read.
+                    val canonical = if (src.scheme == "file") {
+                        canonicalOutsideAppData(src) ?: return@runCatching null
+                    } else {
+                        null
+                    }
                     val name = queryDisplayName(src)
                     val dir = File(context.filesDir, "opened").apply { mkdirs() }
                     val out = File(dir, "open_${System.currentTimeMillis()}.pdf")
-                    val copied = context.contentResolver.openInputStream(src)?.use { input ->
+                    val stream = if (canonical != null) canonical.inputStream() else context.contentResolver.openInputStream(src)
+                    val copied = stream?.use { input ->
                         out.outputStream().use { output -> input.copyTo(output) }
                         true
                     } ?: false
@@ -89,8 +104,19 @@ class AppViewModel @Inject constructor(
                     )
                 }.getOrNull()
             }
+            if (id == null) {
+                _openError.value = "Couldn't open that file. It may be damaged, not a PDF, or no longer available."
+            }
             _pendingOpenDoc.value = id
         }
+    }
+
+    /** The file's canonical location, or null if it is inside Sheaf's private data (or unresolvable). */
+    private fun canonicalOutsideAppData(uri: Uri): File? {
+        val path = uri.path ?: return null
+        val target = runCatching { File(path).canonicalFile }.getOrNull() ?: return null
+        val dataDir = context.dataDir.canonicalPath + File.separator
+        return target.takeUnless { it.path.startsWith(dataDir) }
     }
 
     private suspend fun existingIdenticalCopy(name: String, copy: File): Long? {

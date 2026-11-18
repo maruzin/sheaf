@@ -1,9 +1,13 @@
 package com.sheaf.app.settings
 
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import android.app.Activity
 
 import android.widget.Toast
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.semantics.Role
@@ -66,14 +70,15 @@ fun SettingsScreen(
             )
         },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
+        // Scrolls so nothing is cut off at large font sizes on short phones.
+        Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())) {
             val context = LocalContext.current
             ListItem(
                 headlineContent = { Text(if (state.isPro) "Sheaf Pro — active" else "Sheaf Pro") },
                 supportingContent = {
                     Text(
                         if (state.isPro) "Thanks for supporting Sheaf. All advanced tools are unlocked."
-                        else "Unlock OCR, file compression, and password protection.",
+                        else "Unlock OCR, file compression, password protection and merging PDFs.",
                     )
                 },
                 trailingContent = {
@@ -95,14 +100,18 @@ fun SettingsScreen(
                 }
             }
             HorizontalDivider()
+            // The whole row is the switch, so TalkBack reads "Material You colors, switch, off"
+            // and the target is the full row instead of an unnamed 48dp toggle.
             ListItem(
+                modifier = Modifier.toggleable(
+                    value = state.dynamicColor,
+                    onValueChange = viewModel::setDynamicColor,
+                    role = Role.Switch,
+                ),
                 headlineContent = { Text("Material You colors") },
                 supportingContent = { Text("Use your wallpaper palette instead of Ember") },
                 trailingContent = {
-                    Switch(
-                        checked = state.dynamicColor,
-                        onCheckedChange = viewModel::setDynamicColor,
-                    )
+                    Switch(checked = state.dynamicColor, onCheckedChange = null)
                 },
             )
             HorizontalDivider()
@@ -117,6 +126,7 @@ fun SettingsScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .heightIn(min = 48.dp)
                         .selectable(
                             selected = state.defaultReaderTheme == theme,
                             onClick = { viewModel.setDefaultReaderTheme(theme) },

@@ -22,7 +22,10 @@ object TestPdfs {
 
     private fun write(context: Context, name: String, pages: Int, password: String?): File {
         PDFBoxResourceLoader.init(context)
-        val dir = File(context.cacheDir, "e2e").apply { mkdirs() }
+        // External app cache: readable by Sheaf without permissions, and outside its private data dir,
+        // which "Open with" deliberately refuses (file:// links into app data are blocked).
+        val base = requireNotNull(context.externalCacheDir) { "Emulator needs shared storage for the E2E PDFs" }
+        val dir = File(base, "e2e").apply { mkdirs() }
         val out = File(dir, name)
         PDDocument().use { doc ->
             for (i in 1..pages) {

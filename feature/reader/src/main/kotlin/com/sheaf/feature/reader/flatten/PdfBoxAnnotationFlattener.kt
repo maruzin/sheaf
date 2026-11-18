@@ -1,6 +1,7 @@
 package com.sheaf.feature.reader.flatten
 
 import androidx.core.net.toUri
+import com.sheaf.feature.reader.pdf.PageFrame
 import com.sheaf.feature.reader.pdf.PdfBoxMemory
 import android.content.Context
 import android.net.Uri
@@ -46,13 +47,9 @@ class PdfBoxAnnotationFlattener @Inject constructor(
                     val pages = doc.pages.toList()
                     annotationsByPage.forEach { (pageIndex, list) ->
                         val page = pages.getOrNull(pageIndex) ?: return@forEach
-                        val box = page.mediaBox
-                        val pw = box.width
-                        val ph = box.height
-                        val llx = box.lowerLeftX
-                        val lly = box.lowerLeftY
-                        fun px(nx: Float) = llx + nx * pw
-                        fun py(ny: Float) = lly + (1f - ny) * ph
+                        // Annotations are measured on the page as displayed (crop box + /Rotate).
+                        val frame = PageFrame.of(page)
+                        val pw = frame.displayWidth
 
                         val strokes = list.filter { it.type != AnnotationType.Note && it.points.size >= 2 }
                         if (strokes.isNotEmpty()) {
@@ -66,11 +63,11 @@ class PdfBoxAnnotationFlattener @Inject constructor(
                                     cs.setGraphicsStateParameters(gs)
                                     cs.setStrokingColor(r, g, b)
                                     cs.setLineWidth((a.strokeWidth * pw).coerceAtLeast(0.5f))
-                                    val p0 = a.points.first()
-                                    cs.moveTo(px(p0.x), py(p0.y))
+                                    val (x0, y0) = frame.toPdf(a.points.first().x, a.points.first().y)
+                                    cs.moveTo(x0, y0)
                                     for (i in 1 until a.points.size) {
-                                        val p = a.points[i]
-                                        cs.lineTo(px(p.x), py(p.y))
+                                        val (x, y) = frame.toPdf(a.points[i].x, a.points[i].y)
+                                        cs.lineTo(x, y)
                                     }
                                     cs.stroke()
                                 }
@@ -84,8 +81,7 @@ class PdfBoxAnnotationFlattener @Inject constructor(
                                 val note = PDAnnotationText()
                                 note.contents = a.note.orEmpty()
                                 note.name = PDAnnotationText.NAME_NOTE
-                                val x = px(p.x)
-                                val y = py(p.y)
+                                val (x, y) = frame.toPdf(p.x, p.y)
                                 note.rectangle = PDRectangle(x, y - 18f, 18f, 18f)
                                 val (r, g, b) = rgb(a.colorArgb)
                                 note.color = PDColor(floatArrayOf(r, g, b), PDDeviceRGB.INSTANCE)
