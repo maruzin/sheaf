@@ -72,7 +72,7 @@ policy. Easiest free option: enable **GitHub Pages** on the repo and use
 - Play Billing Library too old — since 31 Aug 2026, **v8 or later** is required. Sheaf uses **8.3.0**. ✔
 - 16 KB memory pages — required for apps targeting Android 15+. All bundled native libs (ML Kit OCR,
   DataStore, Compose graphics) are 16 KB-aligned (checked with `zipalign -c -P 16`). ✔
-- versionCode must go up on every upload (currently **4**, in `AndroidApplicationConventionPlugin.kt`).
+- versionCode must go up on every upload (currently **5**, in `AndroidApplicationConventionPlugin.kt`).
 - Data safety says "no data" while ML Kit sends diagnostics — see the answers above.
 - Store listing / onboarding mentioning features that aren't shipped (e.g. AI chat) → misleading claims.
 - Testing the purchase on a non-license-tester account (it will attempt a real charge).
