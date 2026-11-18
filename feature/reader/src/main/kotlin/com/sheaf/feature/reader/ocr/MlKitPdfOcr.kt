@@ -1,5 +1,6 @@
 package com.sheaf.feature.reader.ocr
 
+import com.sheaf.core.data.log.AppLog
 import androidx.core.net.toUri
 import com.sheaf.feature.reader.pdf.PageFrame
 import com.sheaf.feature.reader.pdf.PdfBoxMemory
@@ -57,7 +58,8 @@ class MlKitPdfOcr @Inject constructor(
         } catch (e: CancellationException) {
             out.delete()
             throw e
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            AppLog.e("OCR", "Making a document searchable failed", e)
             out.delete()
             null
         } finally {

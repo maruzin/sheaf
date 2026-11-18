@@ -1,5 +1,6 @@
 package com.sheaf.feature.reader.forms
 
+import com.sheaf.core.data.log.AppLog
 import androidx.core.net.toUri
 import com.sheaf.feature.reader.pdf.PageFrame
 import com.sheaf.feature.reader.pdf.PdfBoxMemory
@@ -93,7 +94,7 @@ class PdfBoxFormReader @Inject constructor(
             }
             // Only report success if something was actually written (null stream = unreadable source).
             out.takeIf { it.length() > 0 }?.absolutePath
-        }.getOrNull()
+        }.onFailure { AppLog.e("Forms", "Saving the filled form failed", it) }.getOrNull()
     }
 
     private fun typeOf(field: PDField): FormFieldType = when (field) {

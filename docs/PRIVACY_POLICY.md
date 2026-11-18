@@ -39,6 +39,12 @@ metrics. Google uses this to diagnose and improve ML Kit, encrypts it in transit
 share it with third parties. It never includes your documents, images, or recognized text. Details:
 https://developers.google.com/ml-kit/android-data-disclosure
 
+## Diagnostic log
+To help fix problems, Sheaf keeps a small log of errors and crashes **on your device** (technical
+details only: app and Android version, device model, and error messages; never your documents, their
+names or passwords). It is never sent automatically. It leaves your device only if you tap
+**Settings → Share diagnostic log** and choose where to send it. You can clear it at any time in Settings.
+
 ## Third-party services
 - **Google Play services / ML Kit** (document scanning, on-device OCR) — see Google's Privacy Policy.
 - **Google Play Billing** (purchases) — see Google's Privacy Policy.

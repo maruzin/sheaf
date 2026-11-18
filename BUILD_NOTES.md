@@ -4,6 +4,20 @@ Running engineering log. Newest first. Every non-obvious decision gets one line 
 
 ---
 
+## 1.1.0 (versionCode 6), 2026-11-18: diagnostics log, optional hardware, upload key
+- **Diagnostic log** (`core/data/log/AppLog`): errors and warnings go to logcat and a rotating on-device
+  file (`files/logs`, 2 x 256 KB); an uncaught-exception handler writes `last-crash.txt` (stack, version,
+  device) and then defers to Android so Play's Android vitals still records it. Wired into the PDF engines,
+  reader/library/pages ViewModels, "Open with" and Play Billing. Settings -> Diagnostics: "Share diagnostic
+  log" (text file via FileProvider, user picks the recipient), last crash time, "Clear diagnostic log".
+  Never uploaded automatically; logs carry no document text, names or passwords. Privacy policy updated.
+  Verified on the emulator: `adb shell am crash` captured, export + share sheet work, a11y scan clean.
+- **Device catalog:** touchscreen and camera features declared `required="false"` (Play assumed
+  touchscreen required, hiding the app from non-touch Chromebooks).
+- **Signing:** the app's registered Play upload key is DeanPlay (`key0`, SHA1 AF:A8:15:8C...); the first
+  1.1.0 bundle used a new key and was rejected. versionCode 4 -> 5 -> 6.
+- Tests: 66 unit, 8 device (Android 15 emulator), strict lint, R8 bundle signed + verified.
+
 ## Release 1.1.0 (versionCode 4), 2026-11-18: all audit findings fixed, full device + UX testing
 Verified on this Mac: `assembleDebug`, `testDebugUnitTest` **64/64**, strict `lintDebug` (0), `bundleRelease`
 (R8), and `connectedDebugAndroidTest` **8/8 on an Android 15 emulator** (Pixel 7 AVD, arm64). Plus a manual

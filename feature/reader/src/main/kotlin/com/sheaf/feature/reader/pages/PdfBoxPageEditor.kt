@@ -1,5 +1,6 @@
 package com.sheaf.feature.reader.pages
 
+import com.sheaf.core.data.log.AppLog
 import android.content.Context
 import androidx.core.net.toUri
 import com.sheaf.feature.reader.pdf.PdfBoxMemory
@@ -67,7 +68,7 @@ class PdfBoxPageEditor @Inject constructor(
                 }
                 true
             } ?: false
-        }.getOrDefault(false)
+        }.onFailure { AppLog.e("Pages", "Saving the edited page arrangement failed", it) }.getOrDefault(false)
         if (ok && out.length() > 0) {
             out.absolutePath
         } else {

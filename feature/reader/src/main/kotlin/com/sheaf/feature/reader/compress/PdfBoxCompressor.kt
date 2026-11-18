@@ -1,5 +1,6 @@
 package com.sheaf.feature.reader.compress
 
+import com.sheaf.core.data.log.AppLog
 import androidx.core.graphics.scale
 import androidx.core.net.toUri
 import com.sheaf.feature.reader.pdf.PdfBoxMemory
@@ -77,7 +78,7 @@ class PdfBoxCompressor @Inject constructor(
             }.getOrNull() ?: -1L
             val smaller = out.length() > 0 && (original <= 0 || out.length() < original)
             if (smaller) out.absolutePath else { out.delete(); null }
-        }.getOrNull()
+        }.onFailure { AppLog.e("Compress", "Compressing a PDF failed", it) }.getOrNull()
     }
 
     private fun ensureInit() {

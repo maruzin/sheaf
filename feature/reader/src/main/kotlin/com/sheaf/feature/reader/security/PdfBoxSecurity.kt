@@ -1,5 +1,6 @@
 package com.sheaf.feature.reader.security
 
+import com.sheaf.core.data.log.AppLog
 import androidx.core.net.toUri
 import com.sheaf.feature.reader.pdf.PdfBoxMemory
 import android.content.Context
@@ -36,7 +37,7 @@ class PdfBoxSecurity @Inject constructor(
                 }
                 true
             } ?: false
-        }.getOrDefault(false)
+        }.onFailure { AppLog.e("Security", "Password-protecting a PDF failed", it) }.getOrDefault(false)
         if (saved && out.length() > 0) out.absolutePath else null.also { out.delete() }
     }
 
@@ -52,7 +53,7 @@ class PdfBoxSecurity @Inject constructor(
                 }
                 true
             } ?: false
-        }.getOrDefault(false)
+        }.onFailure { AppLog.w("Security", "Unlocking a protected PDF failed (wrong password or damaged file): ${it.javaClass.simpleName}") }.getOrDefault(false)
         if (saved && out.length() > 0) {
             out.absolutePath
         } else {

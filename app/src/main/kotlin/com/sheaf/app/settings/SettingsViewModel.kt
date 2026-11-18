@@ -1,5 +1,11 @@
 package com.sheaf.app.settings
 
+import java.io.File
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import dagger.hilt.android.qualifiers.ApplicationContext
+import com.sheaf.core.data.log.AppLog
+import android.content.Context
 import android.app.Activity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -25,7 +31,32 @@ data class SettingsUiState(
 class SettingsViewModel @Inject constructor(
     private val settings: SettingsRepository,
     private val billing: BillingManager,
+    @ApplicationContext private val context: Context,
 ) : ViewModel() {
+
+    // --- Diagnostics: on-device error/crash log, shared only when the user chooses ---------------
+    private val _lastCrashAt = MutableStateFlow(AppLog.lastCrashAt())
+    val lastCrashAt: StateFlow<Long?> = _lastCrashAt.asStateFlow()
+    private val _diagnosticsFile = MutableStateFlow<File?>(null)
+    /** One-shot: the exported log, ready for the share sheet. */
+    val diagnosticsFile: StateFlow<File?> = _diagnosticsFile.asStateFlow()
+    fun consumeDiagnostics() { _diagnosticsFile.value = null }
+
+    fun exportDiagnostics() {
+        viewModelScope.launch {
+            val out = File(File(context.cacheDir, "share"), "sheaf-diagnostics.txt")
+            val file = withContext(Dispatchers.IO) { AppLog.exportTo(out) }
+            if (file == null) _message.value = "Couldn't prepare the diagnostic log" else _diagnosticsFile.value = file
+        }
+    }
+
+    fun clearDiagnostics() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { AppLog.clear() }
+            _lastCrashAt.value = null
+            _message.value = "Diagnostic log cleared"
+        }
+    }
 
     val state: StateFlow<SettingsUiState> =
         combine(settings.dynamicColor, settings.defaultReaderTheme, settings.isPro) { dyn, theme, pro ->

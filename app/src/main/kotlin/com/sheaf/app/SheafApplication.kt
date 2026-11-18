@@ -2,6 +2,8 @@ package com.sheaf.app
 
 import android.app.Application
 import com.sheaf.core.data.billing.BillingManager
+import com.sheaf.core.data.log.AppLog
+import androidx.core.content.pm.PackageInfoCompat
 import dagger.hilt.android.HiltAndroidApp
 import com.sheaf.feature.reader.security.PdfSecurity
 import kotlinx.coroutines.CoroutineScope
@@ -21,6 +23,9 @@ class SheafApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // First: the on-device diagnostic log and crash handler (Settings -> Share diagnostic log).
+        val info = runCatching { packageManager.getPackageInfo(packageName, 0) }.getOrNull()
+        AppLog.init(this, info?.versionName ?: "?", info?.let { PackageInfoCompat.getLongVersionCode(it) } ?: 0L)
         // Restore any existing Pro entitlement in the background.
         billingManager.start()
         // Remove plaintext copies of protected PDFs left behind if the process was killed mid-read.

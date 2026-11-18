@@ -5,6 +5,14 @@
          required because the ML Kit document scanner runs in Google Play services' own UI. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Nothing in Sheaf needs special hardware. Declared optional so Play doesn't hide the app from
+         devices without it: touchscreen is otherwise assumed required (Chromebooks, keyboard/mouse
+         devices), and the camera is only used by the scanner, which shows a message when absent. -->
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+
     <application
         android:name=".SheafApplication"
         android:allowBackup="true"

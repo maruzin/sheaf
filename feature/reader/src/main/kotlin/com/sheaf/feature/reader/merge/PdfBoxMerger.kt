@@ -1,5 +1,6 @@
 package com.sheaf.feature.reader.merge
 
+import com.sheaf.core.data.log.AppLog
 import android.content.Context
 import androidx.core.net.toUri
 import com.sheaf.feature.reader.pdf.PdfBoxMemory
@@ -33,7 +34,8 @@ class PdfBoxMerger @Inject constructor(
         val sources = ArrayList<PDDocument>(uris.size)
         val result = try {
             PDDocument(PdfBoxMemory.setting()).use { dst -> appendAll(dst, uris, sources, out) }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            AppLog.e("Merge", "Merging ${uris.size} PDFs failed", e)
             MergeResult.Failed
         } finally {
             sources.forEach { runCatching { it.close() } }

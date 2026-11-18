@@ -1,5 +1,6 @@
 package com.sheaf.core.data.billing
 
+import com.sheaf.core.data.log.AppLog
 import android.app.Activity
 import android.content.Context
 import com.android.billingclient.api.AcknowledgePurchaseParams
@@ -46,7 +47,8 @@ class BillingManager @Inject constructor(
             // re-sync instead of leaving them stuck behind the paywall.
             BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED ->
                 scope.launch { runCatching { restore() } }
-            else -> Unit
+            BillingClient.BillingResponseCode.USER_CANCELED -> AppLog.i("Billing", "Purchase cancelled by the user")
+            else -> AppLog.w("Billing", "Purchase update: code ${result.responseCode} ${result.debugMessage}")
         }
     }
 
@@ -84,6 +86,9 @@ class BillingManager @Inject constructor(
             )
             .build()
         val result = client.launchBillingFlow(activity, flowParams)
+        if (result.responseCode != BillingClient.BillingResponseCode.OK) {
+            AppLog.w("Billing", "Purchase flow did not launch: code ${result.responseCode} ${result.debugMessage}")
+        }
         return if (result.responseCode == BillingClient.BillingResponseCode.OK) null else result.debugMessage
     }
 
@@ -112,7 +117,10 @@ class BillingManager @Inject constructor(
             .build()
         val result = runCatching { client.queryPurchasesAsync(params) }.getOrNull() ?: return null
         // Only trust a successful answer from Play; on errors keep the cached entitlement.
-        if (result.billingResult.responseCode != BillingClient.BillingResponseCode.OK) return null
+        if (result.billingResult.responseCode != BillingClient.BillingResponseCode.OK) {
+            AppLog.w("Billing", "Restore: Play answered code ${result.billingResult.responseCode}; keeping the cached entitlement")
+            return null
+        }
         val owned = result.purchasesList.any {
             it.products.contains(PRO_ID) && it.purchaseState == Purchase.PurchaseState.PURCHASED
         }

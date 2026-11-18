@@ -1,5 +1,10 @@
 package com.sheaf.app.settings
 
+import androidx.core.content.FileProvider
+import androidx.compose.foundation.clickable
+import android.text.format.DateUtils
+import android.content.Intent
+import android.content.ClipData
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import android.app.Activity
@@ -55,6 +60,26 @@ fun SettingsScreen(
         message?.let {
             Toast.makeText(toastContext, it, Toast.LENGTH_LONG).show()
             viewModel.consumeMessage()
+        }
+    }
+    val lastCrashAt by viewModel.lastCrashAt.collectAsStateWithLifecycle()
+    val diagnostics by viewModel.diagnosticsFile.collectAsStateWithLifecycle()
+    LaunchedEffect(diagnostics) {
+        diagnostics?.let { file ->
+            viewModel.consumeDiagnostics()
+            runCatching {
+                val uri = FileProvider.getUriForFile(toastContext, toastContext.packageName + ".fileprovider", file)
+                val send = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    putExtra(Intent.EXTRA_SUBJECT, "Sheaf diagnostic log")
+                    clipData = ClipData.newRawUri(file.name, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                toastContext.startActivity(
+                    Intent.createChooser(send, "Share diagnostic log").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
+                )
+            }
         }
     }
     Scaffold(
@@ -143,6 +168,27 @@ fun SettingsScreen(
                 }
             }
             }
+            HorizontalDivider(Modifier.padding(top = 8.dp))
+            Text(
+                text = "Diagnostics",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp).semantics { heading() },
+            )
+            ListItem(
+                modifier = Modifier.clickable(onClickLabel = "Share diagnostic log") { viewModel.exportDiagnostics() },
+                headlineContent = { Text("Share diagnostic log") },
+                supportingContent = {
+                    Text(
+                        "Errors and crashes recorded on this phone, to send with a problem report. " +
+                            "It stays on your device unless you share it." +
+                            (lastCrashAt?.let { "\nLast crash: " + DateUtils.getRelativeTimeSpanString(it) } ?: ""),
+                    )
+                },
+            )
+            TextButton(
+                onClick = { viewModel.clearDiagnostics() },
+                modifier = Modifier.padding(start = 8.dp, bottom = 16.dp),
+            ) { Text("Clear diagnostic log") }
         }
     }
 }

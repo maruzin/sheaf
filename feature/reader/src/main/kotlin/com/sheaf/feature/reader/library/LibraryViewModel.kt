@@ -1,5 +1,6 @@
 package com.sheaf.feature.reader.library
 
+import com.sheaf.core.data.log.AppLog
 import com.sheaf.core.domain.tabs.OpenTabsRepository
 import androidx.core.graphics.createBitmap
 import androidx.core.net.toUri
@@ -200,7 +201,10 @@ class LibraryViewModel @Inject constructor(
                     )
                 }
                 _openDocument.value = id
-            }.onFailure { _error.value = "Couldn't open that file. It may be damaged or not a PDF." }
+            }.onFailure {
+                AppLog.e("Library", "Importing a picked PDF failed", it)
+                _error.value = "Couldn't open that file. It may be damaged or not a PDF."
+            }
             _busy.value = false
         }
     }

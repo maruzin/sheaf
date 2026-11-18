@@ -1,5 +1,6 @@
 package com.sheaf.app
 
+import com.sheaf.core.data.log.AppLog
 import androidx.core.net.toUri
 import android.content.Context
 import android.net.Uri
@@ -102,9 +103,10 @@ class AppViewModel @Inject constructor(
                             addedAt = System.currentTimeMillis(),
                         ),
                     )
-                }.getOrNull()
+                }.onFailure { AppLog.e("OpenWith", "Importing an \"Open with\" file failed", it) }.getOrNull()
             }
             if (id == null) {
+                AppLog.w("OpenWith", "An \"Open with\" file could not be imported (unreadable, empty or refused)")
                 _openError.value = "Couldn't open that file. It may be damaged, not a PDF, or no longer available."
             }
             _pendingOpenDoc.value = id

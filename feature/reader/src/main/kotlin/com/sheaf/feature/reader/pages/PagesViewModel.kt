@@ -1,5 +1,6 @@
 package com.sheaf.feature.reader.pages
 
+import com.sheaf.core.data.log.AppLog
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.lifecycle.ViewModel
@@ -49,6 +50,7 @@ class PagesViewModel @Inject constructor(
                     )
                 }
             }.onFailure { t ->
+                if (t !is SecurityException) AppLog.e("Pages", "Opening Manage pages failed", t)
                 val message = if (t is SecurityException) {
                     "This PDF is password-protected. Remove the password before managing its pages."
                 } else {

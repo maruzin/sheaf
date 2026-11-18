@@ -1,5 +1,6 @@
 package com.sheaf.feature.reader
 
+import com.sheaf.core.data.log.AppLog
 import android.app.Activity
 import android.graphics.Bitmap
 import java.io.File
@@ -189,6 +190,7 @@ class ReaderViewModel @Inject constructor(
             _state.update { it.copy(isLoading = true, documentId = documentId, error = null) }
             val doc = repository.document(documentId)
             if (doc == null) {
+                AppLog.w("Reader", "Document id $documentId not found in the library")
                 _state.update { it.copy(isLoading = false, error = "Document not found") }
                 return@launch
             }
@@ -214,6 +216,7 @@ class ReaderViewModel @Inject constructor(
             if (opened == null) {
                 // PdfRenderer throws SecurityException for password-protected PDFs — prompt for a password.
                 val encrypted = result.exceptionOrNull() is SecurityException
+                if (!encrypted) AppLog.e("Reader", "Opening a document failed", result.exceptionOrNull())
                 if (password != null) discardUnlockedCopy() // decrypted but unrenderable: don't keep it
                 _state.update {
                     it.copy(
