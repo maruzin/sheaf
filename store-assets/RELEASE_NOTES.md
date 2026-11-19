@@ -1,5 +1,16 @@
 # Release notes (Play "What's new", max 500 characters)
 
+## 1.4.0 (versionCode 13)
+
+```
+New in 1.4.0
+Mark up like a pro: lines, arrows, boxes, circles, text boxes and pictures.
+White-out to cover text, then type over it.
+Page tools: insert a blank page, crop margins, split a PDF in two.
+Sheaf Pro adds true redaction, page numbers, watermarks, inserting another PDF and making fillable forms.
+Everything still runs on your phone. No account, no cloud.
+```
+
 ## 1.3.0 (versionCode 12)
 
 ```

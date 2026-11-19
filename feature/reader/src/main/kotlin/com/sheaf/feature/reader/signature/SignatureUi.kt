@@ -177,7 +177,7 @@ internal fun SignatureDialog(
                 }
                 if (offerStamps) {
                     TextButton(onClick = onDismiss, modifier = Modifier.padding(horizontal = 12.dp)) {
-                        Text("Skip: just add a date, tick, cross or text")
+                        Text("Skip: just add a date, tick, text or picture")
                     }
                 }
                 // Scrolls at large font sizes and in landscape, so the buttons are always reachable.
@@ -458,6 +458,8 @@ internal fun SignatureBar(
     activeStamp: String? = null,
     onStamp: (SignatureStore.Stamp) -> Unit = {},
     selectedIsStamp: Boolean = false,
+    /** Set when the selected item is a text box: opens the editor. */
+    onEditText: (() -> Unit)? = null,
 ) {
     Column(Modifier.fillMaxWidth()) {
         Row(
@@ -512,7 +514,7 @@ if (saved.isEmpty()) {
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            val marks = setOf("Date", "Tick", "Cross")
+            val marks = MARKS
             StampChip("Date", activeStamp == "Date", { Icon(Icons.Filled.CalendarToday, null, Modifier.size(18.dp)) }) {
                 onStamp(SignatureStore.Stamp.Date)
             }
@@ -524,6 +526,9 @@ if (saved.isEmpty()) {
             }
             StampChip("Text", activeStamp != null && activeStamp !in marks, { Icon(Icons.Filled.TextFields, null, Modifier.size(18.dp)) }) {
                 onStamp(SignatureStore.Stamp.Text)
+            }
+            StampChip("Picture", activeStamp == "Picture", { Icon(Icons.Filled.Image, null, Modifier.size(18.dp)) }) {
+                onStamp(SignatureStore.Stamp.Picture)
             }
             if (active != null && !hasSelection) TextButton(onClick = onPlaceHere) { Text("Place on this page") }
         }
@@ -543,6 +548,7 @@ if (saved.isEmpty()) {
                 NudgeButton(Icons.AutoMirrored.Filled.RotateLeft, "Turn $what left", enabled = hasSelection) { onNudge(SignatureGestures.Nudge.TurnLeft) }
                 NudgeButton(Icons.AutoMirrored.Filled.RotateRight, "Turn $what right", enabled = hasSelection) { onNudge(SignatureGestures.Nudge.TurnRight) }
             }
+            if (onEditText != null) TextButton(onClick = onEditText) { Text("Edit text") }
             // Remove is the one people look for: always on screen, never scrolled away.
             VerticalDivider(Modifier.height(28.dp))
             IconButton(onClick = onRemove, enabled = hasSelection) {
@@ -572,29 +578,68 @@ if (saved.isEmpty()) {
     }
 }
 
-/** Text for a stamp: a name, "N/A", a reference number, a job title. */
+/**
+ * A text box: a name, "N/A", a reference, a short paragraph. Several lines, three sizes, three colours.
+ * [initial] set = editing a placed text box.
+ */
 @Composable
-internal fun StampTextDialog(initial: String, onDismiss: () -> Unit, onStamp: (String) -> Unit) {
-    var text by rememberSaveable { mutableStateOf(initial) }
+internal fun TextBoxDialog(
+    initial: SignatureStore.TextBox?,
+    lastText: String,
+    onDismiss: () -> Unit,
+    onDone: (SignatureStore.TextBox) -> Unit,
+) {
+    // Cursor at the end, so editing adds to the text rather than in front of it.
+    var field by remember {
+        val start = initial?.text ?: lastText
+        mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(start, androidx.compose.ui.text.TextRange(start.length)))
+    }
+    val text = field.text
+    var size by rememberSaveable { mutableIntStateOf(initial?.size ?: 1) }
+    var colour by rememberSaveable { mutableIntStateOf(initial?.colorArgb ?: SignatureStore.TextBox.COLOURS[0].first) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Text stamp") },
+        title = { Text(if (initial != null) "Edit text" else "Text box") },
         text = {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it.take(SignatureStore.MAX_STAMP_CHARS) },
-                singleLine = true,
-                label = { Text("Text to place") },
-                placeholder = { Text("Your name, N/A, a reference…") },
-                modifier = Modifier.fillMaxWidth(),
-            )
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = field,
+                    onValueChange = { v -> field = if (v.text.length <= SignatureStore.MAX_TEXTBOX_CHARS) v else field },
+                    label = { Text("Text") },
+                    placeholder = { Text("Your name, N/A, a reference, a note…") },
+                    minLines = 2,
+                    maxLines = 6,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text("Size", style = MaterialTheme.typography.labelLarge)
+                Row(Modifier.selectableGroup(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("Small", "Medium", "Large").forEachIndexed { i, label ->
+                        FilterChip(selected = size == i, onClick = { size = i }, label = { Text(label) })
+                    }
+                }
+                Text("Colour", style = MaterialTheme.typography.labelLarge)
+                Row(Modifier.selectableGroup(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    SignatureStore.TextBox.COLOURS.forEach { (argb, name) ->
+                        FilterChip(
+                            selected = colour == argb,
+                            onClick = { colour = argb },
+                            label = { Text(name) },
+                            leadingIcon = { Box(Modifier.size(14.dp).background(Color(argb), CircleShape)) },
+                        )
+                    }
+                }
+            }
         },
-        confirmButton = { Button(onClick = { onStamp(text) }, enabled = text.isNotBlank()) { Text("Place text") } },
+        confirmButton = {
+            Button(onClick = { onDone(SignatureStore.TextBox(text.trimEnd(), size, colour)) }, enabled = text.isNotBlank()) {
+                Text(if (initial != null) "Update" else "Place text")
+            }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 
-private val MARKS = setOf("Date", "Tick", "Cross")
+private val MARKS = setOf("Date", "Tick", "Cross", "Picture")
 private fun chipName(active: String) = if (active in MARKS) active else "Text"
 private fun noun(active: String) = if (active in MARKS) active.lowercase() else "text"
 

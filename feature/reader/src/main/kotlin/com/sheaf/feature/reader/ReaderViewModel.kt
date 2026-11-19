@@ -74,6 +74,7 @@ class ReaderViewModel @Inject constructor(
     private val openTabs: OpenTabsRepository,
     private val signatures: SignatureStore,
     private val exporter: DocumentExporter,
+    private val pageTools: com.sheaf.feature.reader.pagetools.PageTools,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ReaderUiState())
@@ -141,7 +142,7 @@ class ReaderViewModel @Inject constructor(
                 // Leaving markup ends a stamping run: next time Sign starts with your signature again.
                 val fromStamp = it.activeStamp != null
                 it.copy(
-                    annotating = !it.annotating, signatureMode = false, selectedSignatureId = null,
+                    annotating = !it.annotating, signatureMode = false, selectedSignatureId = null, shapeTool = null,
                     activeStamp = null, activeStampHeight = null,
                     activeSignature = if (fromStamp) it.savedSignatures.firstOrNull() else it.activeSignature,
                 )
@@ -149,12 +150,21 @@ class ReaderViewModel @Inject constructor(
             ReaderEvent.Undo -> stepHistory(undo = true)
             ReaderEvent.Redo -> stepHistory(undo = false)
             is ReaderEvent.SetInkColor -> _state.update { it.copy(inkColorArgb = event.argb) }
-            is ReaderEvent.SetHighlighter -> _state.update { it.copy(highlighter = event.on, noteMode = false, signatureMode = false) }
-            is ReaderEvent.SetNoteMode -> _state.update { it.copy(noteMode = event.on, signatureMode = false) }
+            is ReaderEvent.SetHighlighter ->
+                _state.update { it.copy(highlighter = event.on, noteMode = false, signatureMode = false, shapeTool = null) }
+            is ReaderEvent.SetNoteMode -> _state.update { it.copy(noteMode = event.on, signatureMode = false, shapeTool = null) }
             is ReaderEvent.SetSignatureMode ->
-                _state.update { it.copy(signatureMode = event.on, noteMode = false, selectedSignatureId = null) }
+                _state.update { it.copy(signatureMode = event.on, noteMode = false, selectedSignatureId = null, shapeTool = null) }
+            is ReaderEvent.RunPageTool -> runPageTool(event.tool)
+            is ReaderEvent.SetShapeTool -> {
+                // Redaction really removes content on export: a Pro feature.
+                if (event.kind == com.sheaf.feature.reader.markup.ShapeKind.Redact && blockedByPaywall()) return
+                // Creating fillable forms: Pro.
+                if (event.kind?.isFormField == true && blockedByPaywall()) return
+                _state.update { it.copy(shapeTool = event.kind, noteMode = false, signatureMode = false, highlighter = false) }
+            }
             ReaderEvent.StartSigning -> _state.update {
-                it.copy(annotating = true, signatureMode = true, noteMode = false, highlighter = false, formMode = false)
+                it.copy(annotating = true, signatureMode = true, noteMode = false, highlighter = false, formMode = false, shapeTool = null)
             }
             is ReaderEvent.SelectSignature -> _state.update { it.copy(selectedSignatureId = event.id) }
             is ReaderEvent.ChooseSignature -> chooseSignature(event.name)
@@ -803,6 +813,86 @@ class ReaderViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Runs a page tool on the document (its unlocked copy if protected) and opens the new copy, with
+     * the markup carried across. Page numbers, watermark and inserting another PDF are Pro.
+     */
+    private fun runPageTool(tool: com.sheaf.feature.reader.pagetools.PageTool) {
+        val s = _state.value
+        if (s.uri.isBlank() || s.pageToolBusy) return
+        if (tool.pro && blockedByPaywall()) return
+        if (tool is com.sheaf.feature.reader.pagetools.PageTool.InsertPdf && tool.uri.isBlank()) return
+        val source = textUri.ifBlank { s.uri }
+        viewModelScope.launch {
+            _state.update { it.copy(pageToolBusy = true) }
+            val base = s.displayName.substringBeforeLast(".").ifBlank { "Document" }
+            val outputs: List<Pair<String, String>> = when (tool) {
+                is com.sheaf.feature.reader.pagetools.PageTool.Numbers ->
+                    listOfNotNull(pageTools.addPageNumbers(source, tool.position, withTotal = tool.withTotal)?.let { it to tool.suffix })
+                is com.sheaf.feature.reader.pagetools.PageTool.Watermark ->
+                    listOfNotNull(pageTools.addWatermark(source, tool.text, tool.opacity)?.let { it to tool.suffix })
+                is com.sheaf.feature.reader.pagetools.PageTool.Crop ->
+                    listOfNotNull(pageTools.cropMargins(source, tool.fraction)?.let { it to tool.suffix })
+                is com.sheaf.feature.reader.pagetools.PageTool.Blank ->
+                    listOfNotNull(pageTools.insertBlank(source, tool.afterIndex)?.let { it to tool.suffix })
+                is com.sheaf.feature.reader.pagetools.PageTool.InsertPdf ->
+                    listOfNotNull(pageTools.insertPdf(source, tool.uri, tool.afterIndex)?.let { it to tool.suffix })
+                is com.sheaf.feature.reader.pagetools.PageTool.Split ->
+                    pageTools.splitAfter(source, tool.afterIndex)?.let { (a, b) -> listOf(a to "part 1", b to "part 2") }.orEmpty()
+            }
+            if (outputs.isEmpty()) {
+                _state.update { it.copy(pageToolBusy = false, billingMessage = "Couldn't do that. The file may be damaged.") }
+                return@launch
+            }
+            val existing = s.documentId?.let { id -> runCatching { annotationRepo.observeForDocument(id).first() }.getOrNull() }.orEmpty()
+            // Markup after an inserted PDF shifts by its page count (the new copy minus this document).
+            val remapTool = if (tool is com.sheaf.feature.reader.pagetools.PageTool.InsertPdf) {
+                val total = runCatching { com.sheaf.feature.reader.library.countPages(renderFactory, Uri.fromFile(File(outputs[0].first)).toString()) }.getOrDefault(0)
+                tool.copy(insertedPages = (total - s.pageCount).coerceAtLeast(0))
+            } else tool
+            val ids = outputs.mapIndexedNotNull { i, (plain, suffix) ->
+                // A protected document's copies stay protected with the same password.
+                val path = protectedLibraryCopy(plain) ?: return@mapIndexedNotNull null
+                val file = File(path)
+                val id = runCatching {
+                    repository.upsert(
+                        Document(
+                            id = 0, uri = Uri.fromFile(file).toString(), displayName = "$base ($suffix).pdf",
+                            sizeBytes = file.length(), pageCount = 0,
+                            lastOpenedAt = System.currentTimeMillis(), addedAt = System.currentTimeMillis(),
+                        ),
+                    )
+                }.getOrNull() ?: return@mapIndexedNotNull null
+                runCatching {
+                    com.sheaf.feature.reader.pagetools.PageToolRemap.remap(existing, remapTool, id, part = i + 1)
+                        .forEach { annotationRepo.upsert(it) }
+                }
+                id
+            }
+            AppLog.i("PageTools", "Ran ${tool::class.simpleName}: ${ids.size} new document(s)")
+            _state.update {
+                it.copy(
+                    pageToolBusy = false,
+                    ocrDocumentId = ids.firstOrNull(),
+                    billingMessage = when {
+                        ids.isEmpty() -> "Couldn't add the new PDF to your library"
+                        tool is com.sheaf.feature.reader.pagetools.PageTool.Split -> "Saved part 1 and part 2 to your library"
+                        else -> it.billingMessage
+                    },
+                )
+            }
+        }
+    }
+
+    /** Persists a shape dragged from [start] to [end] on [pageIndex] ([pageAspect] = height / width). */
+    fun saveShape(pageIndex: Int, start: NormPoint, end: NormPoint, pageAspect: Float) {
+        val id = _state.value.documentId ?: return
+        val kind = _state.value.shapeTool ?: return
+        val spec = com.sheaf.feature.reader.markup.ShapeSpec.fromDrag(kind, start, end, _state.value.inkColorArgb, pageAspect)
+            ?: return
+        addAnnotation(spec.toAnnotation(id, pageIndex))
+    }
+
     /** Persist a finished ink stroke (points are page-normalized 0..1). */
     fun saveStroke(pageIndex: Int, points: List<NormPoint>) {
         val id = _state.value.documentId ?: return
@@ -945,6 +1035,8 @@ class ReaderViewModel @Inject constructor(
     private suspend fun loadSignatureImages(names: Collection<String>) {
         val missing = names.filter { it !in _state.value.signatureImages }
         if (missing.isEmpty()) return
+        val boxes = missing.mapNotNull { n -> signatures.textBox(n)?.let { n to it } }
+        if (boxes.isNotEmpty()) _state.update { it.copy(textBoxes = it.textBoxes + boxes) }
         val loaded = missing.mapNotNull { n -> signatures.load(n)?.let { n to it } }
         if (loaded.isNotEmpty()) _state.update { it.copy(signatureImages = it.signatureImages + loaded) }
     }
@@ -1027,6 +1119,7 @@ class ReaderViewModel @Inject constructor(
                 SignatureStore.Stamp.Tick -> { content = ""; label = "Tick" }
                 SignatureStore.Stamp.Cross -> { content = ""; label = "Cross" }
                 SignatureStore.Stamp.Text -> { content = text.trim(); label = text.trim() }
+                SignatureStore.Stamp.Picture -> { _state.update { it.copy(signatureBusy = false) }; return@launch }
             }
             val name = signatures.saveStamp(kind, content)
             if (name == null) {
@@ -1051,6 +1144,73 @@ class ReaderViewModel @Inject constructor(
                     selectedSignatureId = null,
                 )
             }
+        }
+    }
+
+    /** Makes a text box (several lines, size, colour) and gets ready to place it, like a stamp. */
+    fun makeTextBox(box: SignatureStore.TextBox) {
+        viewModelScope.launch {
+            _state.update { it.copy(signatureBusy = true) }
+            val name = signatures.saveTextBox(box)
+            if (name == null) {
+                _state.update { it.copy(signatureBusy = false, billingMessage = "Couldn't make that text box") }
+                return@launch
+            }
+            adoptStamp(name, label = box.text.lines().first().take(24).ifBlank { "Text" }, height = textHeight(name, box))
+            _state.update { it.copy(textBoxes = it.textBoxes + (name to box)) }
+        }
+    }
+
+    /** Re-renders the selected text box with new words or style, keeping where it sits and its text size. */
+    fun editSelectedTextBox(box: SignatureStore.TextBox) {
+        val (ann, placement) = selectedSignature() ?: return
+        val old = _state.value.textBoxes[placement.image] ?: return
+        viewModelScope.launch {
+            val name = signatures.saveTextBox(box) ?: run {
+                _state.update { it.copy(billingMessage = "Couldn't change that text box") }
+                return@launch
+            }
+            signatures.load(name)?.let { bmp -> _state.update { it.copy(signatureImages = it.signatureImages + (name to bmp)) } }
+            val aspect = signatures.aspect(name)
+            // Same text size on the page: scale the box height by the line count and size change.
+            val oldLines = old.text.lines().size.coerceAtLeast(1)
+            val newLines = box.text.lines().size.coerceAtLeast(1)
+            val sizeRatio = SignatureStore.TextBox.SIZES[box.size] / SignatureStore.TextBox.SIZES[old.size]
+            val h = placement.h * sizeRatio * newLines / oldLines
+            _state.update { it.copy(textBoxes = it.textBoxes + (name to box)) }
+            updateSignature(ann, placement.copy(image = name, w = h * aspect, h = h).clampedToPage(aspectRatio(ann.pageIndex)))
+        }
+    }
+
+    /** A photo, logo or picture, placed and adjusted like a signature. */
+    fun importPictureStamp(uri: Uri) {
+        viewModelScope.launch {
+            _state.update { it.copy(signatureBusy = true) }
+            val name = signatures.importPicture(uri)
+            if (name == null) {
+                _state.update { it.copy(signatureBusy = false, billingMessage = "Couldn't read that picture") }
+                return@launch
+            }
+            val aspect = signatures.aspect(name)
+            // About half the page wide; SignaturePlacement.new keeps tall pictures to a third of the page.
+            adoptStamp(name, label = "Picture", height = 0.5f / aspect.coerceAtLeast(0.1f))
+        }
+    }
+
+    /** Box height for a text box image, from its line count and size (page-width units). */
+    private suspend fun textHeight(name: String, box: SignatureStore.TextBox): Float {
+        val lines = box.text.lines().size.coerceAtLeast(1)
+        val perLine = SignaturePlacement.STAMP_TEXT_HEIGHT * SignatureStore.TextBox.SIZES[box.size] / SignatureStore.TextBox.SIZES[1]
+        return perLine * lines
+    }
+
+    private suspend fun adoptStamp(name: String, label: String, height: Float) {
+        signatures.load(name)?.let { bmp -> _state.update { it.copy(signatureImages = it.signatureImages + (name to bmp)) } }
+        _state.update {
+            it.copy(
+                signatureBusy = false, activeSignature = name, activeStamp = label, activeStampHeight = height,
+                annotating = true, signatureMode = true, noteMode = false, shapeTool = null, selectedSignatureId = null,
+            )
         }
     }
 

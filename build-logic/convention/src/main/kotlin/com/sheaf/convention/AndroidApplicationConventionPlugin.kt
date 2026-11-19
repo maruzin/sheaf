@@ -17,8 +17,8 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
                 applicationId = AppConfig.APPLICATION_ID
                 targetSdk = AppConfig.TARGET_SDK
                 // Bump versionCode on EVERY build you upload to Play (each upload must be unique + higher).
-                versionCode = 12
-                versionName = "1.3.0"
+                versionCode = 13
+                versionName = "1.4.0"
                 testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
             }
         }

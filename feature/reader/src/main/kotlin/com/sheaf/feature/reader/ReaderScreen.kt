@@ -75,11 +75,12 @@ import com.sheaf.feature.reader.signature.SignatureBar
 import com.sheaf.feature.reader.signature.SignatureDialog
 import com.sheaf.feature.reader.signature.SignaturePlacement
 import com.sheaf.feature.reader.signature.SignatureStore
-import com.sheaf.feature.reader.signature.StampTextDialog
+import com.sheaf.feature.reader.signature.TextBoxDialog
 import com.sheaf.feature.reader.signature.drawSignatures
 import com.sheaf.feature.reader.signature.signatureGestures
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.graphics.ImageBitmap
@@ -107,6 +108,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -161,6 +163,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.compose.material.icons.filled.Circle
+import androidx.compose.material.icons.filled.CropSquare
+import androidx.compose.material.icons.filled.HorizontalRule
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 
 private val InkColors = listOf(
     0xFFE4713B.toInt(), 0xFFE5484D.toInt(), 0xFF3457D5.toInt(),
@@ -266,6 +272,16 @@ fun ReaderScreen(
         if (!state.hasSignature) showSignatureDialog = true
     }
     var stampText by rememberSaveable { mutableStateOf("") }
+    var editingTextBox by rememberSaveable { mutableStateOf(false) }
+    var showPageTools by rememberSaveable { mutableStateOf(false) }
+    val insertPdfLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            viewModel.onEvent(ReaderEvent.RunPageTool(com.sheaf.feature.reader.pagetools.PageTool.InsertPdf(uri.toString(), state.currentPage, -1)))
+        }
+    }
+    val pictureLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) viewModel.importPictureStamp(uri)
+    }
     var showExportDialog by remember { mutableStateOf(false) }
     // The picker result arrives after the state was consumed: hold the request here meanwhile.
     // Saveable, so rotating the phone (or the system killing Sheaf) inside the picker doesn't lose
@@ -394,6 +410,10 @@ fun ReaderScreen(
                                 )
                             }
                             HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("Page tools (numbers, watermark, crop, insert, split)") },
+                                onClick = { menuOpen = false; showPageTools = true },
+                            )
                             DropdownMenuItem(
                                 text = { Text("Manage pages (reorder, rotate, extract)") },
                                 onClick = {
@@ -547,6 +567,9 @@ fun ReaderScreen(
                                 state.activeStamp != null && stampLabel(kind, state.activeStamp) == state.activeStamp ->
                                     viewModel.stopStamping()
                                 kind == SignatureStore.Stamp.Text -> showStampText = true
+                                kind == SignatureStore.Stamp.Picture -> runCatching {
+                                    pictureLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                                }
                                 else -> viewModel.makeStamp(kind)
                             }
                         },
@@ -555,6 +578,7 @@ fun ReaderScreen(
                                 ?.let { SignaturePlacement.of(it)?.image }
                                 ?.let { image -> image !in state.savedSignatures }
                         } ?: false,
+                        onEditText = selectedImage(state)?.takeIf { it in state.textBoxes }?.let { { editingTextBox = true } },
                     )
                 } else if (state.annotating) {
                     InkToolbar(
@@ -572,8 +596,29 @@ fun ReaderScreen(
                         canRedo = state.canRedo,
                         onUndo = { viewModel.onEvent(ReaderEvent.Undo) },
                         onRedo = { viewModel.onEvent(ReaderEvent.Redo) },
+                        shapeTool = state.shapeTool,
+                        isPro = state.isPro,
+                        onShapeTool = { viewModel.onEvent(ReaderEvent.SetShapeTool(it)) },
                     )
-                    if (!state.noteMode && !state.signatureMode) {
+                    if (state.shapeTool != null) {
+                        Text(
+                            when (state.shapeTool) {
+                                com.sheaf.feature.reader.markup.ShapeKind.WhiteOut ->
+                                    "Drag over text to cover it. Then add a Text stamp on top to write the new text."
+                                com.sheaf.feature.reader.markup.ShapeKind.Redact ->
+                                    "Drag over anything private. On share or save, the page becomes an image and what's under the box is gone for good."
+                                com.sheaf.feature.reader.markup.ShapeKind.Line ->
+                                    "Drag to draw a line. It straightens itself under or through a line of text."
+                                com.sheaf.feature.reader.markup.ShapeKind.FormText, com.sheaf.feature.reader.markup.ShapeKind.FormCheckbox ->
+                                    "Drag a box where people should fill in. Share or save, and the copy is a fillable form."
+                                else -> "Drag on the page to draw. Use two fingers to scroll or zoom."
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 4.dp)
+                                .semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite },
+                        )
+                    } else if (!state.noteMode && !state.signatureMode) {
                         Text(
                             "Draw with one finger. Use two fingers to scroll or zoom.",
                             style = MaterialTheme.typography.labelSmall,
@@ -650,6 +695,8 @@ fun ReaderScreen(
                     signatureImages = state.signatureImages,
                     selectedSignatureId = state.selectedSignatureId,
                     stamping = state.activeStamp != null,
+                    shapeTool = if (state.annotating) state.shapeTool else null,
+                    onShape = { page, a, b, aspect -> viewModel.saveShape(page, a, b, aspect) },
                     onPlaceSignature = { page, pt, aspect -> viewModel.placeSignature(page, pt, aspect) },
                     onUpdateSignature = { ann, placement -> viewModel.updateSignature(ann, placement) },
                     onSelectSignature = { viewModel.onEvent(ReaderEvent.SelectSignature(it)) },
@@ -790,16 +837,44 @@ fun ReaderScreen(
         )
     }
 
-    if (showStampText) {
-        StampTextDialog(
-            initial = stampText,
-            onDismiss = { showStampText = false },
-            onStamp = { text ->
-                stampText = text
+    if (showStampText || editingTextBox) {
+        val selectedBox = if (editingTextBox) selectedImage(state)?.let { state.textBoxes[it] } else null
+        TextBoxDialog(
+            initial = selectedBox,
+            lastText = stampText,
+            onDismiss = { showStampText = false; editingTextBox = false },
+            onDone = { box ->
+                stampText = box.text
+                if (editingTextBox) viewModel.editSelectedTextBox(box) else viewModel.makeTextBox(box)
                 showStampText = false
-                viewModel.makeStamp(SignatureStore.Stamp.Text, text)
+                editingTextBox = false
             },
         )
+    }
+
+    if (showPageTools) {
+        com.sheaf.feature.reader.pagetools.PageToolsDialog(
+            page = state.currentPage,
+            pageCount = state.pageCount,
+            isPro = state.isPro,
+            onDismiss = { showPageTools = false },
+            onRun = { tool -> showPageTools = false; viewModel.onEvent(ReaderEvent.RunPageTool(tool)) },
+            onInsertPdf = {
+                showPageTools = false
+                if (state.isPro) runCatching { insertPdfLauncher.launch(arrayOf("application/pdf")) }
+                else viewModel.onEvent(ReaderEvent.RunPageTool(com.sheaf.feature.reader.pagetools.PageTool.InsertPdf("", state.currentPage, 0)))
+            },
+        )
+    }
+    if (state.pageToolBusy) {
+        androidx.compose.ui.window.Dialog(onDismissRequest = {}) {
+            androidx.compose.material3.Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)) {
+                Row(Modifier.padding(24.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(24.dp))
+                    Text("Making the new PDF…", Modifier.padding(start = 16.dp))
+                }
+            }
+        }
     }
 
     if (showExportDialog) {
@@ -1007,6 +1082,9 @@ private fun InkToolbar(
     canRedo: Boolean,
     onUndo: () -> Unit,
     onRedo: () -> Unit,
+    shapeTool: com.sheaf.feature.reader.markup.ShapeKind? = null,
+    isPro: Boolean = false,
+    onShapeTool: (com.sheaf.feature.reader.markup.ShapeKind?) -> Unit = {},
 ) {
     // Scrolls horizontally: 4 tools + 6 colours + actions don't fit a 360dp phone in one row.
     Row(
@@ -1024,15 +1102,16 @@ private fun InkToolbar(
         IconButton(onClick = onRedo, enabled = canRedo) {
             Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo")
         }
-        IconButton(onClick = { onTool(false) }, modifier = Modifier.toolState(!highlighter && !noteMode && !signatureMode)) {
+        val penOn = !highlighter && !noteMode && !signatureMode && shapeTool == null
+        IconButton(onClick = { onTool(false) }, modifier = Modifier.toolState(penOn)) {
             Icon(
                 Icons.Filled.Draw,
                 contentDescription = "Pen",
-                tint = if (!highlighter && !noteMode) MaterialTheme.colorScheme.primary
+                tint = if (penOn) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        IconButton(onClick = { onTool(true) }, modifier = Modifier.toolState(highlighter && !noteMode && !signatureMode)) {
+        IconButton(onClick = { onTool(true) }, modifier = Modifier.toolState(highlighter && !noteMode && !signatureMode && shapeTool == null)) {
             Icon(
                 Icons.Filled.Brush,
                 contentDescription = "Highlighter",
@@ -1047,6 +1126,41 @@ private fun InkToolbar(
                 tint = if (noteMode) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+        // Shapes: line (straight, snaps level for underline / strikethrough), arrow, box, circle,
+        // white-out (cover text, then type over it with a text stamp) and redaction (Pro).
+        Box {
+            var shapesOpen by remember { mutableStateOf(false) }
+            IconButton(onClick = { shapesOpen = true }, modifier = Modifier.toolState(shapeTool != null)) {
+                Icon(
+                    when (shapeTool) {
+                        com.sheaf.feature.reader.markup.ShapeKind.Ellipse -> Icons.Filled.Circle
+                        com.sheaf.feature.reader.markup.ShapeKind.Arrow -> Icons.AutoMirrored.Filled.ArrowForward
+                        com.sheaf.feature.reader.markup.ShapeKind.Line -> Icons.Filled.HorizontalRule
+                        else -> Icons.Filled.CropSquare
+                    },
+                    contentDescription = "Shapes" + (shapeTool?.let { ", ${it.label} selected" } ?: ""),
+                    tint = if (shapeTool != null) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            DropdownMenu(expanded = shapesOpen, onDismissRequest = { shapesOpen = false }) {
+                com.sheaf.feature.reader.markup.ShapeKind.entries.forEach { kind ->
+                    val label = when (kind) {
+                        com.sheaf.feature.reader.markup.ShapeKind.Line -> "Line (underline, strike through)"
+                        com.sheaf.feature.reader.markup.ShapeKind.WhiteOut -> "White-out (cover text)"
+                        com.sheaf.feature.reader.markup.ShapeKind.Redact -> "Redact (remove for good)" + if (isPro) "" else " (Pro)"
+                        com.sheaf.feature.reader.markup.ShapeKind.FormText -> "Add a text field (make a form)" + if (isPro) "" else " (Pro)"
+                        com.sheaf.feature.reader.markup.ShapeKind.FormCheckbox -> "Add a checkbox (make a form)" + if (isPro) "" else " (Pro)"
+                        else -> kind.label
+                    }
+                    DropdownMenuItem(
+                        text = { Text(label) },
+                        trailingIcon = { if (kind == shapeTool) Icon(Icons.Filled.Check, contentDescription = "Selected") },
+                        onClick = { shapesOpen = false; onShapeTool(kind) },
+                    )
+                }
+            }
         }
         IconButton(onClick = onSignature, modifier = Modifier.toolState(signatureMode)) {
             Icon(
@@ -1141,12 +1255,18 @@ private fun SearchBar(
     }
 }
 
+/** Image name of the selected placement, if any. */
+private fun selectedImage(state: ReaderUiState): String? = state.selectedSignatureId?.let { id ->
+    state.annotationsByPage.values.flatten().firstOrNull { it.id == id }?.let { SignaturePlacement.of(it)?.image }
+}
+
 /** The chip label a stamp kind maps to ("Text" covers any typed text). */
 private fun stampLabel(kind: SignatureStore.Stamp, active: String?): String? = when (kind) {
     SignatureStore.Stamp.Date -> "Date"
     SignatureStore.Stamp.Tick -> "Tick"
     SignatureStore.Stamp.Cross -> "Cross"
-    SignatureStore.Stamp.Text -> active?.takeIf { it !in setOf("Date", "Tick", "Cross") }
+    SignatureStore.Stamp.Text -> active?.takeIf { it !in setOf("Date", "Tick", "Cross", "Picture") }
+    SignatureStore.Stamp.Picture -> "Picture"
 }
 
 /** Saved-state forms of the requests that wait on a system picker (plain strings survive process death). */
@@ -1228,6 +1348,8 @@ private fun PageList(
     annotationsByPage: Map<Int, List<Annotation>>,
     onZoomChange: (Float) -> Unit,
     onStroke: (Int, List<NormPoint>) -> Unit,
+    shapeTool: com.sheaf.feature.reader.markup.ShapeKind? = null,
+    onShape: (Int, NormPoint, NormPoint, Float) -> Unit = { _, _, _, _ -> },
     onTapNote: (Int, NormPoint) -> Unit,
     onEditNote: (Annotation) -> Unit,
     signatureMode: Boolean,
@@ -1332,6 +1454,8 @@ private fun PageList(
                         inkColor = inkColor,
                         savedStrokes = annotationsByPage[index].orEmpty(),
                         onStroke = { pts -> onStroke(index, pts) },
+                        shapeTool = shapeTool,
+                        onShape = { a, b, aspect -> onShape(index, a, b, aspect) },
                         onTapNote = { pt -> onTapNote(index, pt) },
                         onEditNote = onEditNote,
                         signatureMode = signatureMode,
@@ -1367,6 +1491,8 @@ private fun PdfPageItem(
     inkColor: Color,
     savedStrokes: List<Annotation>,
     onStroke: (List<NormPoint>) -> Unit,
+    shapeTool: com.sheaf.feature.reader.markup.ShapeKind? = null,
+    onShape: (NormPoint, NormPoint, Float) -> Unit = { _, _, _ -> },
     onTapNote: (NormPoint) -> Unit,
     onEditNote: (Annotation) -> Unit,
     signatureMode: Boolean,
@@ -1396,6 +1522,7 @@ private fun PdfPageItem(
         savedStrokes.mapNotNull { a -> SignaturePlacement.of(a)?.let { a to it } }
     }
     var liveSignature by remember(pageIndex) { mutableStateOf<LiveSignature?>(null) }
+    var liveShape by remember(pageIndex) { mutableStateOf<com.sheaf.feature.reader.markup.ShapeSpec?>(null) }
     // Keep showing (and hit-testing) a dragged signature where the finger left it until the database
     // holds that same placement. Clearing it on any database update made the next tap or drag use the
     // old position: a quick tap after a drag missed and deselected the signature.
@@ -1431,9 +1558,32 @@ private fun PdfPageItem(
             CircularProgressIndicator(Modifier.semantics { contentDescription = "Loading $pageLabel" })
         }
         Canvas(
-            Modifier.matchParentSize().clipToBounds().pointerInput(annotating, noteMode, signatureMode) {
+            Modifier.matchParentSize().clipToBounds().pointerInput(annotating, noteMode, signatureMode, shapeTool) {
                 if (!annotating) return@pointerInput
-                if (signatureMode) {
+                val tool = shapeTool
+                if (tool != null && !signatureMode && !noteMode) {
+                    // Drag out a shape; a second finger cancels it so the page still scrolls and zooms.
+                    awaitEachGesture {
+                        val w = size.width.toFloat().coerceAtLeast(1f)
+                        val h = size.height.toFloat().coerceAtLeast(1f)
+                        fun norm(o: Offset) = NormPoint((o.x / w).coerceIn(0f, 1f), (o.y / h).coerceIn(0f, 1f))
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val start = norm(down.position)
+                        var end = start
+                        var cancelled = false
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            if (event.changes.count { it.pressed } > 1) { cancelled = true; break }
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!change.pressed) break
+                            end = norm(change.position)
+                            liveShape = com.sheaf.feature.reader.markup.ShapeSpec.fromDrag(tool, start, end, inkColor.toArgb(), h / w)
+                            change.consume()
+                        }
+                        liveShape = null
+                        if (!cancelled) onShape(start, end, h / w)
+                    }
+                } else if (signatureMode) {
                     signatureGestures(
                         placements = { currentPlaced },
                         selectedId = { currentSelected },
@@ -1483,11 +1633,13 @@ private fun PdfPageItem(
             },
         ) {
             savedStrokes.forEach { ann ->
-                if (ann.type == AnnotationType.Signature || ann.type == AnnotationType.Note) return@forEach
+                if (ann.type == AnnotationType.Signature || ann.type == AnnotationType.Note || ann.type == AnnotationType.Shape) return@forEach
                 val base = Color(ann.colorArgb)
                 val c = if (ann.type == AnnotationType.Highlight) base.copy(alpha = 0.30f) else base
                 drawInk(ann.points, c, ann.strokeWidth, pageFilter)
             }
+            savedStrokes.forEach { ann -> com.sheaf.feature.reader.markup.ShapeSpec.of(ann)?.let { drawShape(it, pageFilter) } }
+            liveShape?.let { drawShape(it, pageFilter) }
             drawSignatures(
                 placed = placed,
                 images = signatureImages,
@@ -1614,6 +1766,48 @@ private fun shareFilledPdf(context: android.content.Context, path: String, displ
     }
 }
 
+/** Draws a shape the same way the exported PDF does (see the flattener). */
+private fun DrawScope.drawShape(sh: com.sheaf.feature.reader.markup.ShapeSpec, pageFilter: androidx.compose.ui.graphics.ColorFilter?) {
+    val w = size.width; val h = size.height
+    val c = Color(sh.drawColor)
+    // White-out and redaction are about what the page shows, so they ignore the reading theme.
+    val filter = if (sh.filled) null else pageFilter
+    val stroke = Stroke(width = (sh.widthFrac * w).coerceAtLeast(2f), cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round)
+    val a = Offset(sh.start.x * w, sh.start.y * h)
+    val b = Offset(sh.end.x * w, sh.end.y * h)
+    val topLeft = Offset(minOf(a.x, b.x), minOf(a.y, b.y))
+    val boxSize = androidx.compose.ui.geometry.Size(kotlin.math.abs(a.x - b.x), kotlin.math.abs(a.y - b.y))
+    when (sh.kind) {
+        com.sheaf.feature.reader.markup.ShapeKind.Line -> drawLine(c, a, b, stroke.width, cap = StrokeCap.Round, colorFilter = filter)
+        com.sheaf.feature.reader.markup.ShapeKind.Arrow -> {
+            drawLine(c, a, b, stroke.width, cap = StrokeCap.Round, colorFilter = filter)
+            sh.arrowHead(w, h).forEach { (x, y) -> drawLine(c, b, Offset(x, y), stroke.width, cap = StrokeCap.Round, colorFilter = filter) }
+        }
+        com.sheaf.feature.reader.markup.ShapeKind.Rectangle -> drawRect(c, topLeft, boxSize, style = stroke, colorFilter = filter)
+        com.sheaf.feature.reader.markup.ShapeKind.Ellipse -> drawOval(c, topLeft, boxSize, style = stroke, colorFilter = filter)
+        com.sheaf.feature.reader.markup.ShapeKind.WhiteOut -> {
+            drawRect(c, topLeft, boxSize)
+            // A faint outline so the user can see where the white-out is on a white page.
+            drawRect(Color(0x33000000), topLeft, boxSize, style = Stroke(1.dp.toPx()))
+        }
+        com.sheaf.feature.reader.markup.ShapeKind.Redact -> drawRect(c, topLeft, boxSize)
+        com.sheaf.feature.reader.markup.ShapeKind.FormText, com.sheaf.feature.reader.markup.ShapeKind.FormCheckbox -> {
+            // A form field to be: light blue fill and dashed border, like form editors show them.
+            val blue = Color(0xFF1A56DB)
+            drawRect(blue.copy(alpha = 0.10f), topLeft, boxSize)
+            drawRect(
+                blue, topLeft, boxSize,
+                style = Stroke(1.5f.dp.toPx(), pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx()))),
+            )
+            if (sh.kind == com.sheaf.feature.reader.markup.ShapeKind.FormCheckbox) {
+                val inset = minOf(boxSize.width, boxSize.height) * 0.25f
+                drawLine(blue, topLeft + Offset(inset, boxSize.height / 2), topLeft + Offset(boxSize.width * 0.45f, boxSize.height - inset), 2.dp.toPx())
+                drawLine(blue, topLeft + Offset(boxSize.width * 0.45f, boxSize.height - inset), topLeft + Offset(boxSize.width - inset, inset), 2.dp.toPx())
+            }
+        }
+    }
+}
+
 private fun DrawScope.drawInk(
     points: List<NormPoint>,
     color: Color,
@@ -1640,6 +1834,7 @@ private fun annotationLabel(ann: Annotation): String = when (ann.type) {
     AnnotationType.Strikethrough -> "Strikethrough"
     AnnotationType.Ink -> "Ink"
     AnnotationType.Signature -> "Signature"
+    AnnotationType.Shape -> com.sheaf.feature.reader.markup.ShapeSpec.of(ann)?.kind?.label ?: "Shape"
 }
 
 private fun themeLabel(theme: ReaderTheme): String = when (theme) {

@@ -101,6 +101,7 @@ class ReaderViewModelTest {
             openTabs = tabs,
             signatures = signatureStore,
             exporter = mockk(relaxed = true),
+            pageTools = mockk(relaxed = true),
         )
     }
 

@@ -42,6 +42,8 @@ data class ReaderUiState(
     val inkColorArgb: Int = 0xFFE4713B.toInt(),
     val highlighter: Boolean = false,
     val noteMode: Boolean = false,
+    /** Drawing a shape (line, arrow, box, circle, white-out, redaction) instead of free ink. */
+    val shapeTool: com.sheaf.feature.reader.markup.ShapeKind? = null,
     val signatureMode: Boolean = false,
     // Signatures: saved images (newest first), the one new placements use, decoded images for drawing.
     val savedSignatures: List<String> = emptyList(),
@@ -54,6 +56,8 @@ data class ReaderUiState(
     /** The active placement is a stamp (date, tick, cross or text): its label, and its box height. */
     val activeStamp: String? = null,
     val activeStampHeight: Float? = null,
+    /** Words and style of placed text boxes, by image name, so a selected one can be edited. */
+    val textBoxes: Map<String, com.sheaf.feature.reader.signature.SignatureStore.TextBox> = emptyMap(),
     val annotationsListVisible: Boolean = false,
     val annotationsByPage: Map<Int, List<Annotation>> = emptyMap(),
     val canUndo: Boolean = false,
@@ -72,7 +76,9 @@ data class ReaderUiState(
     val compressedPath: String? = null,
     // OCR (make searchable)
     val ocrRunning: Boolean = false,
+    /** A new library document to open (OCR result or a page tool's copy). */
     val ocrDocumentId: Long? = null,
+    val pageToolBusy: Boolean = false,
     // Flatten annotations/signature into the PDF for sharing
     val flattening: Boolean = false,
     val flattenedPath: String? = null,
@@ -139,6 +145,8 @@ sealed interface ReaderEvent {
     data class SetHighlighter(val on: Boolean) : ReaderEvent
     data class SetNoteMode(val on: Boolean) : ReaderEvent
     data class SetSignatureMode(val on: Boolean) : ReaderEvent
+    data class SetShapeTool(val kind: com.sheaf.feature.reader.markup.ShapeKind?) : ReaderEvent
+    data class RunPageTool(val tool: com.sheaf.feature.reader.pagetools.PageTool) : ReaderEvent
     data object StartSigning : ReaderEvent
     data class SelectSignature(val id: Long?) : ReaderEvent
     data class ChooseSignature(val name: String) : ReaderEvent

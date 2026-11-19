@@ -37,8 +37,11 @@ SIGN ANY DOCUMENT
 • Sign PDFs, photos and pictures: any image becomes a PDF you can sign
 • Share the signed copy straight to email, WhatsApp or Drive, or save it to your phone
 
-ANNOTATE
+ANNOTATE AND MARK UP
 • Highlight passages and draw with a pen in six colours
+• Lines, arrows, boxes and circles to underline, strike through and point things out
+• Text boxes in three sizes and colours, and pictures such as a logo or a photo
+• White-out to cover a mistake, then type the correction over it
 • Add sticky notes anywhere on a page
 • All annotations in one list, with undo and redo
 
@@ -49,6 +52,7 @@ FILL PDF FORMS
 ORGANISE PAGES
 • Rotate, delete and reorder pages
 • Extract pages: save just the pages you pick as a new PDF
+• Insert a blank page, crop margins, or split a PDF in two
 • Save the result as a new PDF
 
 SCAN TO PDF
@@ -69,7 +73,10 @@ SHEAF PRO: ONE-TIME PURCHASE, NO SUBSCRIPTION
 • OCR: turn scans into searchable, selectable text
 • Compress PDF: reduce file size for email and upload
 • Password-protect a PDF with AES encryption
-• Merge several PDFs into one
+• Merge several PDFs into one, or insert another PDF anywhere
+• True redaction: blacked-out text is removed from the file, not just covered
+• Page numbers and watermarks on every page
+• Make fillable forms: add text fields and checkboxes
 • Export to Word and Excel
 • Copy and export text from scanned documents
 

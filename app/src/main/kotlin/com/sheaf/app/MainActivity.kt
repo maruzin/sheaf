@@ -3,6 +3,8 @@ package com.sheaf.app
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import kotlinx.coroutines.launch
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.ui.platform.LocalContext
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -30,6 +32,8 @@ import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+    @javax.inject.Inject lateinit var settings: com.sheaf.core.domain.repository.SettingsRepository
+
     // Each "Open with" is a new event, even for the same file: a plain uri string would be equal to
     // the last one, so opening the same file again (e.g. from Files) did nothing.
     private val incoming = mutableStateOf<Incoming?>(null)
@@ -40,6 +44,7 @@ class MainActivity : ComponentActivity() {
         // A recreated activity (rotation, process restore) still carries the original "Open with"
         // intent. It was already handled, so reading it again would import and open the file twice.
         if (savedInstanceState == null) incoming.value = incomingPdfUri(intent)?.let(::Incoming)
+        unlockProForTesting(intent)
         setContent {
             val event by incoming
             SheafApp(incoming = event)
@@ -51,6 +56,22 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         incoming.value = incomingPdfUri(intent)?.let(::Incoming)
+        unlockProForTesting(intent)
+    }
+
+    /**
+     * QA only: debuggable builds (never the Play release, which is not debuggable) unlock Pro when
+     * launched with the "sheaf.debug_pro" extra, so Pro flows can be tested on an emulator without
+     * Play billing: `adb shell am start -n <app>/com.sheaf.app.MainActivity --ez sheaf.debug_pro true`.
+     */
+    private fun unlockProForTesting(intent: Intent?) {
+        val debuggable = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        if (!debuggable || intent?.getBooleanExtra(DEBUG_PRO_EXTRA, false) != true) return
+        lifecycleScope.launch { settings.setPro(true) }
+    }
+
+    private companion object {
+        const val DEBUG_PRO_EXTRA = "sheaf.debug_pro"
     }
 }
 

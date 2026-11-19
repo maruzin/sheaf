@@ -265,4 +265,127 @@ class SigningAndExportEngineTest {
         assertTrue("no /Encrypt left in the unlocked copy", !text.contains("/Encrypt"))
         PDDocument.load(File(out)).use { assertTrue(!it.isEncrypted) }
     }
+
+    private fun textPdf(name: String, text: String): File {
+        val f = File(context.cacheDir, name)
+        PDDocument().use { d ->
+            val page = PDPage(PDRectangle.A4); d.addPage(page)
+            com.tom_roush.pdfbox.pdmodel.PDPageContentStream(d, page).use { cs ->
+                cs.beginText(); cs.setFont(com.tom_roush.pdfbox.pdmodel.font.PDType1Font.HELVETICA, 14f)
+                cs.newLineAtOffset(72f, 700f); cs.showText(text); cs.endText()
+            }
+            d.save(f)
+        }
+        return f
+    }
+
+    @Test
+    fun `shapes are drawn as vectors and white-out as a filled box`() = runTest {
+        val src = textPdf("shapes.pdf", "Account number 12345678")
+        val anns = listOf(
+            com.sheaf.feature.reader.markup.ShapeSpec(com.sheaf.feature.reader.markup.ShapeKind.Arrow, NormPoint(0.1f, 0.5f), NormPoint(0.6f, 0.5f), 0xFFC5221F.toInt(), 0.004f),
+            com.sheaf.feature.reader.markup.ShapeSpec(com.sheaf.feature.reader.markup.ShapeKind.Ellipse, NormPoint(0.2f, 0.6f), NormPoint(0.5f, 0.7f), 0xFF1F3FA8.toInt(), 0.004f),
+            com.sheaf.feature.reader.markup.ShapeSpec(com.sheaf.feature.reader.markup.ShapeKind.WhiteOut, NormPoint(0.1f, 0.14f), NormPoint(0.6f, 0.19f), 0, 0f),
+        ).mapIndexed { i, s -> s.toAnnotation(1, 0, id = i + 1L) }
+        val out = PdfBoxAnnotationFlattener(context, Dispatchers.Unconfined, store).flatten(Uri.fromFile(src).toString(), mapOf(0 to anns))
+        assertNotNull(out)
+        PDDocument.load(File(out!!)).use { d ->
+            val ops = operators(d.getPage(0))
+            assertTrue("strokes", ops.count { it == "S" } >= 4) // arrow line + 2 head strokes + ellipse
+            assertTrue("bezier ellipse", ops.contains("c"))
+            assertTrue("white-out fill", ops.contains("f"))
+            // White-out only covers: the text is still in the file (that is what Redact is for).
+            assertTrue(com.tom_roush.pdfbox.text.PDFTextStripper().getText(d).contains("12345678"))
+        }
+    }
+
+    @Test
+    fun `redaction removes the text under the box for good`() = runTest {
+        val src = textPdf("redact.pdf", "Account number 12345678")
+        val box = com.sheaf.feature.reader.markup.ShapeSpec(
+            com.sheaf.feature.reader.markup.ShapeKind.Redact, NormPoint(0.05f, 0.1f), NormPoint(0.9f, 0.2f), 0, 0f,
+        ).toAnnotation(1, 0, id = 1)
+        val out = PdfBoxAnnotationFlattener(context, Dispatchers.Unconfined, store).flatten(Uri.fromFile(src).toString(), mapOf(0 to listOf(box)))
+        assertNotNull(out)
+        PDDocument.load(File(out!!)).use { d ->
+            assertEquals(1, d.numberOfPages)
+            val text = com.tom_roush.pdfbox.text.PDFTextStripper().getText(d)
+            assertTrue("no extractable text left: '$text'", !text.contains("12345678") && !text.contains("Account"))
+            val page = d.getPage(0)
+            val images = page.resources.xObjectNames.map { page.resources.getXObject(it) }.filterIsInstance<PDImageXObject>()
+            assertEquals("the page is now one picture", 1, images.size)
+            assertEquals(595.27563f, page.mediaBox.width, 0.5f)
+        }
+    }
+
+    @Test
+    fun `a text box keeps its words and style for editing`() = runTest {
+        val box = SignatureStore.TextBox("Seán Ó Briain\nApt 4 | Dublin", size = 2, colorArgb = 0xFF1F3FA8.toInt())
+        val name = store.saveTextBox(box)!!
+        assertEquals(box, store.textBox(name))
+        val bmp = store.load(name)!!
+        assertTrue("two lines make a taller image than one", bmp.height > SignatureStore.TextBox.SIZES[2] * 1.8f)
+        assertEquals(null, store.saveTextBox(box.copy(text = "  \n ")))
+        // Removing it deletes the image and its words.
+        store.sweep(keep = emptySet(), now = Long.MAX_VALUE)
+        assertEquals(null, store.textBox(name))
+    }
+
+    @Test
+    fun `a placed photo is embedded as compact JPEG, ink keeps transparency`() = runTest {
+        val photo = File(context.cacheDir, "photo.jpg")
+        val bmp = Bitmap.createBitmap(800, 600, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.rgb(30, 120, 200)) }
+        photo.outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+        val name = store.importPicture(Uri.fromFile(photo))!!
+        val placement = SignaturePlacement.new(name, NormPoint(0.5f, 0.5f), store.aspect(name), 1.4142f, 0.5f / store.aspect(name))
+        val out = PdfBoxAnnotationFlattener(context, Dispatchers.Unconfined, store)
+            .flatten(Uri.fromFile(pdf()).toString(), mapOf(0 to listOf(placement.toAnnotation(1, 0, id = 1))))
+        PDDocument.load(File(out!!)).use { d ->
+            val page = d.getPage(0)
+            val img = page.resources.xObjectNames.map { page.resources.getXObject(it) }.filterIsInstance<PDImageXObject>().single()
+            assertEquals("jpg", img.suffix)
+            assertEquals(null, img.cosObject.getDictionaryObject(COSName.SMASK))
+        }
+    }
+
+    @Test
+    fun `boxes drawn as form fields become a fillable form`() = runTest {
+        val anns = listOf(
+            com.sheaf.feature.reader.markup.ShapeSpec(com.sheaf.feature.reader.markup.ShapeKind.FormText, NormPoint(0.2f, 0.2f), NormPoint(0.7f, 0.24f), 0, 0f),
+            com.sheaf.feature.reader.markup.ShapeSpec(com.sheaf.feature.reader.markup.ShapeKind.FormText, NormPoint(0.2f, 0.3f), NormPoint(0.7f, 0.34f), 0, 0f),
+            com.sheaf.feature.reader.markup.ShapeSpec(com.sheaf.feature.reader.markup.ShapeKind.FormCheckbox, NormPoint(0.2f, 0.4f), NormPoint(0.24f, 0.43f), 0, 0f),
+        ).mapIndexed { i, s -> s.toAnnotation(1, 0, id = i + 1L) }
+        val made = PdfBoxAnnotationFlattener(context, Dispatchers.Unconfined, store).flatten(Uri.fromFile(pdf()).toString(), mapOf(0 to anns))!!
+        val reader = com.sheaf.feature.reader.forms.PdfBoxFormReader(context, Dispatchers.Unconfined)
+        val fields = reader.readFields(Uri.fromFile(File(made)).toString())
+        assertEquals(listOf("Checkbox 1", "Text 1", "Text 2"), fields.map { it.name }.sorted())
+        // The new form fills like any other form.
+        val filled = reader.fillAndSave(Uri.fromFile(File(made)).toString(), mapOf("Text 1" to "Dean", "Checkbox 1" to "true"))!!
+        PDDocument.load(File(filled)).use { d ->
+            val acro = d.documentCatalog.acroForm
+            if (acro != null && acro.fields.isNotEmpty()) {
+                assertEquals("Dean", acro.getField("Text 1").valueAsString)
+                assertTrue((acro.getField("Checkbox 1") as com.tom_roush.pdfbox.pdmodel.interactive.form.PDCheckBox).isChecked)
+            } else {
+                assertTrue(com.tom_roush.pdfbox.text.PDFTextStripper().getText(d).contains("Dean"))
+            }
+        }
+    }
+
+    @Test
+    fun `a form field survives a redaction on the same page`() = runTest {
+        val src = textPdf("redact-form.pdf", "Secret 999")
+        val anns = listOf(
+            com.sheaf.feature.reader.markup.ShapeSpec(com.sheaf.feature.reader.markup.ShapeKind.Redact, NormPoint(0.05f, 0.1f), NormPoint(0.9f, 0.2f), 0, 0f),
+            com.sheaf.feature.reader.markup.ShapeSpec(com.sheaf.feature.reader.markup.ShapeKind.FormText, NormPoint(0.2f, 0.5f), NormPoint(0.7f, 0.54f), 0, 0f),
+        ).mapIndexed { i, s -> s.toAnnotation(1, 0, id = i + 1L) }
+        val out = PdfBoxAnnotationFlattener(context, Dispatchers.Unconfined, store).flatten(Uri.fromFile(src).toString(), mapOf(0 to anns))!!
+        PDDocument.load(File(out)).use { d ->
+            assertTrue(!com.tom_roush.pdfbox.text.PDFTextStripper().getText(d).contains("999"))
+            val field = d.documentCatalog.acroForm.getField("Text 1")
+            assertNotNull(field)
+            // Its widget is on the page that is actually in the document.
+            assertTrue(d.getPage(0).annotations.any { it.cosObject == field.widgets.first().cosObject })
+        }
+    }
 }

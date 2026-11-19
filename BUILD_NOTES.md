@@ -4,6 +4,31 @@ Running engineering log. Newest first. Every non-obvious decision gets one line 
 
 ---
 
+## 1.4.0 (versionCode 13), 2026-11-19: Pro Editor (markup, white-out, redaction, page tools, forms)
+Closes the main gaps against paid PDF editors, all on-device (no cloud, per the product rule).
+- **Shapes (`markup/ShapeSpec`, new `AnnotationType.Shape`):** line, arrow, box, circle, white-out,
+  redact, text field, checkbox. Drawn by dragging; lines and arrows snap level or vertical within 4°;
+  drags under 1.5% of the page are ignored. Stored as two points plus the kind in `note`, so no schema change.
+- **Export:** shapes are vectors in the PDF (ellipse as 4 Béziers, through the page frame so rotated
+  pages work). White-out is a white fill. **Redaction** rasterises the whole page at 200 dpi and replaces
+  it, so the text under the box is gone from the file (rasterising avoids AGPL redaction libraries).
+  Form fields become real AcroForm fields (text with /Helv DA, checkbox with Yes/Off appearances) and are
+  added after rasterising, because a rasterised page would otherwise drop the widget.
+- **Text boxes and pictures** reuse the signature placement engine (image annotation + move/resize/turn).
+  Text box metadata sits beside the PNG as `.txt` so Edit text keeps position; pictures are EXIF-rotated,
+  capped at 2000 px, embedded as JPEG when opaque.
+- **Page tools (`pagetools/`):** page numbers (6 positions, "n of N"), watermark, crop margins, insert
+  blank page, insert another PDF, split. Each writes a new library copy ("name (numbered).pdf" etc.) and
+  carries annotations across (`PageToolRemap`: crop rescales points, insert shifts pages, split partitions).
+- **Free/Pro:** markup, white-out, text box, picture, blank page, crop and split are free. Redaction,
+  page numbers, watermark, insert PDF and form-field creation are Pro.
+- **Tests:** 136 unit (23 new: shape geometry, page tools on real PdfBox, remap, redaction removes text,
+  form fields fill and survive redaction); 16 device on Android 15 and 8.0, twice each (2 new: draw shapes,
+  insert blank page). Extract-pages device test now retries a tap swallowed by thumbnail recomposition.
+  Monkey 10,000 events on both emulators: 0 crashes, 0 ANRs.
+- **Debug only:** `--ez sheaf.debug_pro true` on the launch intent unlocks Pro in debuggable builds
+  (gated on FLAG_DEBUGGABLE; R8 release ignores it). Used for hands-on Pro QA.
+
 ## 1.3.0 (versionCode 12), 2026-11-19: release-readiness sprint (QA plan, UX review, stress, Android 8)
 vc11 never uploaded. A full QA pass before release: qa-engineer wrote a 150-case plan
 (vault: Sheaf - QA Test Plan 1.3.0), ui-ux-designer reviewed the new surfaces, then stress, Office,

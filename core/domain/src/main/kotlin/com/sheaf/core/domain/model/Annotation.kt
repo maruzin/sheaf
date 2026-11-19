@@ -21,6 +21,9 @@ enum class AnnotationType {
 
     /** A placed signature image: see feature/reader SignaturePlacement for the point/note encoding. */
     Signature,
+
+    /** A vector shape (line, arrow, box, ellipse, white-out, redaction): see feature/reader ShapeSpec. */
+    Shape,
 }
 
 /** A point in page-normalized space; (0,0) = top-left, (1,1) = bottom-right of the page. */

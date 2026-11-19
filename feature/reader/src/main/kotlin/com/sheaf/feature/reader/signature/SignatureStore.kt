@@ -131,6 +131,7 @@ class SignatureStore @Inject constructor(
         dir.listFiles()?.forEach { f ->
             if (NAME.matches(f.name) && f.name !in keep && now - f.lastModified() > SWEEP_MIN_AGE_MS) {
                 cache.remove(f.name)
+                File(f.path + ".txt").delete()
                 if (f.delete()) deleted++
             }
         }
@@ -139,7 +140,7 @@ class SignatureStore @Inject constructor(
     }
 
     /** Fill-and-sign stamps: placed and exported exactly like a signature image. */
-    enum class Stamp { Date, Tick, Cross, Text }
+    enum class Stamp { Date, Tick, Cross, Text, Picture }
 
     /**
      * Renders a stamp as a transparent PNG in signature ink: [text] for [Stamp.Text] and [Stamp.Date]
@@ -169,6 +170,7 @@ class SignatureStore @Inject constructor(
                         }
                     }
                 }
+                Stamp.Picture -> return@withContext null // pictures come from importPicture
                 Stamp.Text, Stamp.Date -> {
                     val clean = text.replace(Regex("\\s+"), " ").trim().take(MAX_STAMP_CHARS)
                     if (clean.isEmpty()) return@withContext null
@@ -186,6 +188,74 @@ class SignatureStore @Inject constructor(
             }
             writePng(bmp)
         }.onFailure { AppLog.e("Signature", "Making a stamp failed", it) }.getOrNull()
+    }
+
+    /** A text box's words and style, kept beside its image so it can be edited after placing. */
+    data class TextBox(val text: String, val size: Int, val colorArgb: Int) {
+        companion object {
+            /** Rendered text heights (px) for Small, Medium and Large. */
+            val SIZES = listOf(70f, 110f, 160f)
+            val COLOURS = listOf(0xFF15171C.toInt() to "Black", 0xFF1F3FA8.toInt() to "Blue", 0xFFC5221F.toInt() to "Red")
+        }
+    }
+
+    /**
+     * Renders a multi-line text box (up to [MAX_TEXTBOX_CHARS]) as a transparent PNG and remembers its
+     * words and style, so "Edit text" can re-render it later. Null for blank text or on failure.
+     */
+    suspend fun saveTextBox(box: TextBox): String? = withContext(io) {
+        val lines = box.text.replace("\r", "").take(MAX_TEXTBOX_CHARS).split('\n').map { it.trimEnd() }
+            .dropLastWhile { it.isBlank() }
+        if (lines.isEmpty() || lines.all { it.isBlank() }) return@withContext null
+        runCatching {
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = box.colorArgb
+                textSize = TextBox.SIZES[box.size.coerceIn(0, TextBox.SIZES.lastIndex)]
+                typeface = android.graphics.Typeface.SANS_SERIF
+            }
+            val fm = paint.fontMetrics
+            val lineH = fm.descent - fm.ascent
+            val pad = paint.textSize * 0.15f
+            val w = (lines.maxOf { paint.measureText(it) } + pad * 2).roundToInt().coerceIn(16, 4000)
+            val h = (lineH * lines.size + pad * 2).roundToInt().coerceIn(16, 4000)
+            val bmp = createBitmap(w, h)
+            val c = Canvas(bmp)
+            lines.forEachIndexed { i, line -> c.drawText(line, pad, pad - fm.ascent + i * lineH, paint) }
+            val name = writePng(bmp)
+            File(dir, "$name.txt").writeText("${box.size}|${box.colorArgb}|${box.text}")
+            name
+        }.onFailure { AppLog.e("Signature", "Making a text box failed", it) }.getOrNull()
+    }
+
+    /** The words and style of a text box image, or null for any other image. */
+    suspend fun textBox(name: String): TextBox? = withContext(io) {
+        val f = file(name)?.let { File(it.path + ".txt") }?.takeIf { it.isFile } ?: return@withContext null
+        runCatching {
+            val raw = f.readText()
+            val (size, colour) = raw.split('|', limit = 3).let { it[0].toInt() to it[1].toInt() }
+            TextBox(raw.split('|', limit = 3)[2], size, colour)
+        }.getOrNull()
+    }
+
+    /**
+     * A photo, logo or picture to place on a page, kept in its own colours (no ink extraction). Opaque
+     * pictures are saved without alpha so exports embed them as compact JPEG.
+     */
+    suspend fun importPicture(uri: Uri): String? = withContext(io) {
+        try {
+            val bmp = decode(uri, MAX_PICTURE_SIDE) ?: return@withContext null
+            val opaque = !bmp.hasAlpha() || run {
+                val px = IntArray(bmp.width * bmp.height).also { bmp.getPixels(it, 0, bmp.width, 0, 0, bmp.width, bmp.height) }
+                px.all { (it ushr 24) == 0xFF }
+            }
+            val out = if (bmp.isMutable) bmp else bmp.copy(Bitmap.Config.ARGB_8888, true).also { bmp.recycle() }
+            if (opaque) out.setHasAlpha(false)
+            writePng(out)
+        } catch (oom: OutOfMemoryError) {
+            AppLog.e("Signature", "Picture too large to place", oom); null
+        } catch (e: Exception) {
+            AppLog.e("Signature", "Placing a picture failed", e); null
+        }
     }
 
     /** Converts a legacy single-stroke signature (drawn on a 2.5:1 pad) into an image. */
@@ -206,6 +276,8 @@ class SignatureStore @Inject constructor(
         const val PREFIX = "png:"
         const val MAX_SAVED = 6
         const val MAX_STAMP_CHARS = 60
+        const val MAX_TEXTBOX_CHARS = 500
+        private const val MAX_PICTURE_SIDE = 2000
         private const val MAX_IMPORT_SIDE = 1200
         private const val SWEEP_MIN_AGE_MS = 5 * 60_000L
         private val NAME = Regex("sig_[0-9_]+\\.png")

@@ -314,8 +314,14 @@ class ReaderEndToEndTest {
             compose.onNodeWithContentDescription("More").performClick()
             compose.onNodeWithText("Manage pages", substring = true).performClick()
             waitForText("Extract pages")
-            compose.onNodeWithText("Extract pages").performClick()
-            waitForText("Choose pages to extract")
+            // Thumbnails load in as the screen opens; retry the tap if a recomposition swallowed it.
+            compose.waitUntil(timeout) {
+                if (compose.onAllNodesWithText("Choose pages to extract").fetchSemanticsNodes().isEmpty()) {
+                    runCatching { compose.onNodeWithText("Extract pages").performClick() }
+                    compose.waitForIdle()
+                }
+                compose.onAllNodesWithText("Choose pages to extract").fetchSemanticsNodes().isNotEmpty()
+            }
             compose.onNodeWithContentDescription("Page 2").performClick()
             compose.onNodeWithContentDescription("Page 3").performClick()
             waitForText("2 selected")
@@ -369,11 +375,11 @@ class ReaderEndToEndTest {
             activate("Sign document")
             // First run shows the signature dialog; its Skip leads to stamps. Otherwise go straight on.
             compose.waitUntil(timeout) {
-                compose.onAllNodesWithText("Skip: just add a date, tick, cross or text").fetchSemanticsNodes().isNotEmpty() ||
+                compose.onAllNodesWithText("Skip: just add a date, tick, text or picture").fetchSemanticsNodes().isNotEmpty() ||
                     compose.onAllNodesWithContentDescription("Tick stamp").fetchSemanticsNodes().isNotEmpty()
             }
-            if (compose.onAllNodesWithText("Skip: just add a date, tick, cross or text").fetchSemanticsNodes().isNotEmpty()) {
-                activate("Skip: just add a date, tick, cross or text")
+            if (compose.onAllNodesWithText("Skip: just add a date, tick, text or picture").fetchSemanticsNodes().isNotEmpty()) {
+                activate("Skip: just add a date, tick, text or picture")
             }
             activate("Tick stamp")
             activate("Place on this page")
@@ -401,6 +407,50 @@ class ReaderEndToEndTest {
     private fun waitForDescriptionOrText(label: String) = compose.waitUntil(timeout) {
         compose.onAllNodesWithContentDescription(label).fetchSemanticsNodes().isNotEmpty() ||
             compose.onAllNodesWithText(label).fetchSemanticsNodes().isNotEmpty()
+    }
+
+    @Test
+    fun drawABoxAndAnArrowWithTheShapesTool() {
+        val pdf = TestPdfs.plain(context, "e2e-shapes-${System.nanoTime()}.pdf", pages = 1)
+        launchWith(pdf).use {
+            waitForDescription("Page 1 of 1")
+            compose.onNodeWithContentDescription("Annotate").performClick()
+            waitForDescription("Shapes")
+            compose.onNodeWithContentDescription("Shapes").performScrollTo().performClick()
+            compose.onNodeWithText("Box").performClick()
+            waitForText("Drag on the page to draw", substring = true)
+            compose.onNodeWithContentDescription("Page 1 of 1").performTouchInput {
+                swipe(Offset(width * 0.2f, height * 0.3f), Offset(width * 0.6f, height * 0.4f), 300)
+            }
+            compose.onNodeWithContentDescription("Shapes", substring = true).performScrollTo().performClick()
+            compose.onNodeWithText("Arrow").performClick()
+            compose.onNodeWithContentDescription("Page 1 of 1").performTouchInput {
+                swipe(Offset(width * 0.2f, height * 0.6f), Offset(width * 0.7f, height * 0.5f), 300)
+            }
+            compose.waitUntil(timeout) {
+                runCatching { compose.onNodeWithContentDescription("Undo").assertIsEnabled() }.isSuccess
+            }
+            compose.onNodeWithContentDescription("Annotate").performClick()
+            waitForDescription("Annotations")
+            compose.onNodeWithContentDescription("Annotations").performClick()
+            waitForText("Box")
+            waitForText("Arrow")
+        }
+    }
+
+    @Test
+    fun pageToolsInsertABlankPageAsANewCopy() {
+        val pdf = TestPdfs.plain(context, "e2e-blank-${System.nanoTime()}.pdf", pages = 2)
+        launchWith(pdf).use {
+            waitForDescription("Page 1 of 2")
+            compose.onNodeWithContentDescription("More").performClick()
+            compose.onNodeWithText("Page tools", substring = true).performClick()
+            waitForText("Insert a blank page after page 1")
+            compose.onNodeWithText("Insert a blank page after page 1").performClick()
+            // The new copy opens with one more page.
+            waitForText("(with blank page)", substring = true)
+            waitForDescription("Page 1 of 3")
+        }
     }
 
     @Test
