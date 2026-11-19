@@ -18,6 +18,9 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.isRoot
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipe
@@ -78,10 +81,7 @@ class ReaderEndToEndTest {
             compose.waitUntilAtLeastOneExists(hasContentDescription(description), timeout)
         } catch (e: androidx.compose.ui.test.ComposeTimeoutException) {
             throw AssertionError(
-                "Timed out waiting for description '$description'. Screen: " +
-                    runCatching { compose.onRoot(useUnmergedTree = true).printToString(maxDepth = 30) }
-                        .getOrElse { "<no compose root: ${it.message}>" }
-                        .replace("\n", " | "),
+                "Timed out waiting for description '$description'. Screen: " + screenDump(),
                 e,
             )
         }
@@ -226,10 +226,10 @@ class ReaderEndToEndTest {
             // A device that already has a saved signature goes straight to signing: ask for a new one.
             compose.waitUntil(timeout) {
                 compose.onAllNodesWithText("Your signature").fetchSemanticsNodes().isNotEmpty() ||
-                    compose.onAllNodesWithText("New").fetchSemanticsNodes().isNotEmpty()
+                    compose.onAllNodesWithText("New signature").fetchSemanticsNodes().isNotEmpty()
             }
             if (compose.onAllNodesWithText("Your signature").fetchSemanticsNodes().isEmpty()) {
-                compose.onNodeWithText("New").performClick()
+                compose.onNodeWithText("New signature").performClick()
                 waitForText("Your signature")
             }
             compose.onNodeWithText("Draw").performClick()
@@ -291,13 +291,13 @@ class ReaderEndToEndTest {
             compose.onNodeWithContentDescription("Tick stamp").performClick()
             waitForText("Tap each place the tick goes", substring = true)
             compose.onNodeWithContentDescription("Page 1 of 1").performTouchInput { click(Offset(width * 0.2f, height * 0.3f)) }
-            waitForText("Stamp selected", substring = true)
+            waitForText("Selected. Adjust it", substring = true)
             // Stamping: a second tap on empty page adds another tick (it doesn't just deselect).
             compose.onNodeWithContentDescription("Page 1 of 1").performTouchInput { click(Offset(width * 0.2f, height * 0.5f)) }
             compose.onNodeWithContentDescription("Date stamp").performScrollTo().performClick()
             waitForText("Tap each place the date goes", substring = true)
             compose.onNodeWithText("Place on this page").performScrollTo().performClick()
-            waitForText("Stamp selected", substring = true)
+            waitForText("Selected. Adjust it", substring = true)
             compose.onNodeWithText("Done").performClick()
             waitForDescription("Annotations")
             compose.onNodeWithContentDescription("Annotations").performClick()
@@ -312,10 +312,10 @@ class ReaderEndToEndTest {
         launchWith(pdf).use {
             waitForDescription("Page 1 of 3")
             compose.onNodeWithContentDescription("More").performClick()
-            compose.onNodeWithText("Manage pages").performClick()
-            waitForText("Select")
-            compose.onNodeWithText("Select").performClick()
-            waitForText("0 selected")
+            compose.onNodeWithText("Manage pages", substring = true).performClick()
+            waitForText("Extract pages")
+            compose.onNodeWithText("Extract pages").performClick()
+            waitForText("Choose pages to extract")
             compose.onNodeWithContentDescription("Page 2").performClick()
             compose.onNodeWithContentDescription("Page 3").performClick()
             waitForText("2 selected")
@@ -324,6 +324,83 @@ class ReaderEndToEndTest {
             waitForText("(pages 2-3)", substring = true)
             waitForDescription("Page 1 of 2")
         }
+    }
+
+    @Test
+    fun markupSurvivesClosingAndReopeningTheApp() {
+        val pdf = TestPdfs.plain(context, "e2e-persist-${System.nanoTime()}.pdf", pages = 1)
+        launchWith(pdf).use {
+            waitForDescription("Page 1 of 1")
+            compose.onNodeWithContentDescription("Annotate").performClick()
+            waitForDescription("Undo")
+            compose.onNodeWithContentDescription("Page 1 of 1").performTouchInput {
+                swipe(Offset(width * 0.2f, height * 0.3f), Offset(width * 0.8f, height * 0.4f), 400)
+            }
+            compose.waitUntil(timeout) {
+                runCatching { compose.onNodeWithContentDescription("Undo").assertIsEnabled() }.isSuccess
+            }
+        }
+        // A fresh activity (the app closed and opened again) shows the same document's markup.
+        launchWith(pdf).use {
+            waitForDescription("Page 1 of 1")
+            waitForDescription("Annotations")
+            compose.onNodeWithContentDescription("Annotations").performClick()
+            waitForText("Ink", substring = true)
+        }
+    }
+
+    /**
+     * The TalkBack route: every step uses the accessibility click action (what a TalkBack double-tap
+     * sends) on labelled controls, never a touch on the page. Proves a blind user can sign, adjust and
+     * remove a signature or stamp without dragging.
+     */
+    @Test
+    fun signingWorksThroughAccessibilityActionsAlone() {
+        val pdf = TestPdfs.plain(context, "e2e-a11y-${System.nanoTime()}.pdf", pages = 1)
+        fun activate(label: String) {
+            waitForDescriptionOrText(label)
+            val byDesc = compose.onAllNodesWithContentDescription(label).fetchSemanticsNodes()
+            val node = if (byDesc.isNotEmpty()) compose.onAllNodesWithContentDescription(label)[0]
+            else compose.onAllNodesWithText(label)[0]
+            node.performSemanticsAction(SemanticsActions.OnClick)
+        }
+        launchWith(pdf).use {
+            waitForDescription("Page 1 of 1")
+            activate("Sign document")
+            // First run shows the signature dialog; its Skip leads to stamps. Otherwise go straight on.
+            compose.waitUntil(timeout) {
+                compose.onAllNodesWithText("Skip: just add a date, tick, cross or text").fetchSemanticsNodes().isNotEmpty() ||
+                    compose.onAllNodesWithContentDescription("Tick stamp").fetchSemanticsNodes().isNotEmpty()
+            }
+            if (compose.onAllNodesWithText("Skip: just add a date, tick, cross or text").fetchSemanticsNodes().isNotEmpty()) {
+                activate("Skip: just add a date, tick, cross or text")
+            }
+            activate("Tick stamp")
+            activate("Place on this page")
+            waitForText("Selected. Adjust it", substring = true)
+            activate("Move stamp left")
+            activate("Make stamp bigger")
+            activate("Turn stamp right")
+            activate("Remove stamp")
+            waitForText("Tap each place the tick goes", substring = true)
+            // Undo brings it back, also by action.
+            activate("Undo")
+            compose.waitUntil(timeout) {
+                runCatching { compose.onNodeWithContentDescription("Redo").assertIsEnabled() }.isSuccess
+            }
+        }
+    }
+
+    /** Every window's semantics (dialogs are separate roots), on one line for the Gradle console. */
+    private fun screenDump(): String = runCatching {
+        compose.onAllNodes(isRoot(), useUnmergedTree = true).fetchSemanticsNodes().indices.joinToString(" || ") { i ->
+            compose.onAllNodes(isRoot(), useUnmergedTree = true)[i].printToString(maxDepth = 30)
+        }
+    }.getOrElse { "<no compose root: ${it.message}>" }.replace("\n", " | ")
+
+    private fun waitForDescriptionOrText(label: String) = compose.waitUntil(timeout) {
+        compose.onAllNodesWithContentDescription(label).fetchSemanticsNodes().isNotEmpty() ||
+            compose.onAllNodesWithText(label).fetchSemanticsNodes().isNotEmpty()
     }
 
     @Test

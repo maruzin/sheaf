@@ -57,6 +57,12 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.activity.compose.BackHandler
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -70,14 +76,44 @@ fun PagesScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     LaunchedEffect(documentId) { viewModel.open(documentId) }
     LaunchedEffect(state.savedDocumentId) { state.savedDocumentId?.let { onSaved(it) } }
+    val snackbar = remember { SnackbarHostState() }
+    LaunchedEffect(state.actionError) {
+        state.actionError?.let { msg ->
+            val r = snackbar.showSnackbar(msg, actionLabel = "Retry", duration = SnackbarDuration.Long)
+            viewModel.consumeActionError()
+            if (r == SnackbarResult.ActionPerformed) viewModel.lastAction?.invoke()
+        }
+    }
+    // Back leaves select mode first; with unsaved changes it asks before throwing them away.
+    var confirmDiscard by remember { mutableStateOf(false) }
+    BackHandler(enabled = state.selecting) { viewModel.setSelecting(false) }
+    BackHandler(enabled = state.edited && !state.selecting && !state.saving) { confirmDiscard = true }
+    if (confirmDiscard) {
+        AlertDialog(
+            onDismissRequest = { confirmDiscard = false },
+            title = { Text("Discard your changes?") },
+            text = { Text("The page changes aren't saved yet. Save a copy to keep them.") },
+            confirmButton = {
+                TextButton(onClick = { confirmDiscard = false; viewModel.save() }) { Text("Save copy") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDiscard = false; onBack() }) { Text("Discard") }
+            },
+        )
+    }
 
     Scaffold(
         modifier = modifier,
+        snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
                 title = {
                     Text(
-                        if (state.selecting) "${state.selected.size} selected" else "Manage pages",
+                        when {
+                            !state.selecting -> "Manage pages"
+                            state.selected.isEmpty() -> "Choose pages to extract"
+                            else -> "${state.selected.size} selected"
+                        },
                         modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                     )
                 },
@@ -87,7 +123,7 @@ fun PagesScreen(
                             Icon(Icons.Filled.Close, contentDescription = "Stop selecting")
                         }
                     } else {
-                        IconButton(onClick = onBack) {
+                        IconButton(onClick = { if (state.edited && !state.saving) confirmDiscard = true else onBack() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
                     }
@@ -97,7 +133,7 @@ fun PagesScreen(
                         state.saving -> CircularProgressIndicator(Modifier.size(22.dp).padding(end = 12.dp))
                         state.selecting -> {
                             TextButton(onClick = { viewModel.selectAll() }) {
-                                Text(if (state.selected.size == state.items.size) "Clear" else "All")
+                                Text(if (state.selected.size == state.items.size) "Clear" else "Select all")
                             }
                             Button(onClick = { viewModel.extract() }, enabled = state.selected.isNotEmpty()) {
                                 Text("Extract")
@@ -106,7 +142,7 @@ fun PagesScreen(
                         else -> {
                             // Extract: pick pages and save just those as a new PDF.
                             TextButton(onClick = { viewModel.setSelecting(true) }, enabled = state.items.isNotEmpty()) {
-                                Text("Select")
+                                Text("Extract pages")
                             }
                             TextButton(onClick = { viewModel.save() }, enabled = state.items.isNotEmpty()) {
                                 Text("Save copy")

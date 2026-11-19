@@ -42,6 +42,16 @@ object SignatureGestures {
     fun frame(p: SignaturePlacement, pageW: Float, pageH: Float) =
         Frame(p.cx * pageW, p.cy * pageH, p.w * pageW / 2f, p.h * pageW / 2f, p.rotation)
 
+    /**
+     * The frame the handles sit on: the box itself, but never smaller than [minHalf] each way from its
+     * centre. On a small stamp (a tick, a date) the handles then ring the item instead of covering it,
+     * and the delete and resize discs never sit on top of each other. Drawing and touch both use it.
+     */
+    fun handleFrame(f: Frame, handleRadius: Float): Frame {
+        val minHalf = handleRadius * 1.6f
+        return f.copy(hw = maxOf(f.hw, minHalf), hh = maxOf(f.hh, minHalf))
+    }
+
     /** Distance of the rotate knob above the box's top edge, in pixels. */
     fun rotateKnobOffset(handleRadius: Float) = handleRadius * 2.2f
 
@@ -64,7 +74,7 @@ object SignatureGestures {
         val reach = maxOf(handleRadius * 1.4f, minTouchRadius)
         val deleteReach = handleRadius * 1.4f
         placements.firstOrNull { it.first == selectedId }?.let { (id, p) ->
-            val f = frame(p, pageW, pageH)
+            val f = handleFrame(frame(p, pageW, pageH), handleRadius)
             val (lx, ly) = f.toLocal(x, y)
             // On a small signature the handles' zones overlap: the nearest handle wins.
             val candidates = listOf(
@@ -75,7 +85,8 @@ object SignatureGestures {
             candidates.filter { (_, d, r) -> d <= r }.minByOrNull { it.second }?.let { return Hit(id, it.first) }
         }
         for ((id, p) in placements.asReversed()) {
-            val f = frame(p, pageW, pageH)
+            // Small stamps are grabbed across the same minimum frame, so a tick is easy to pick up.
+            val f = handleFrame(frame(p, pageW, pageH), handleRadius * 0.5f)
             val (lx, ly) = f.toLocal(x, y)
             // A little slack so thin signatures are still easy to grab.
             val slack = handleRadius * 0.5f
@@ -89,8 +100,16 @@ object SignatureGestures {
         start.copy(cx = start.cx + dx / pageW, cy = start.cy + dy / pageH).clampedToPage(pageH / pageW)
 
     /** [start] scaled so its bottom-right corner follows the finger at ([x], [y]); proportions kept. */
-    fun resize(start: SignaturePlacement, x: Float, y: Float, pageW: Float, pageH: Float): SignaturePlacement {
-        val f = frame(start, pageW, pageH)
+    fun resize(
+        start: SignaturePlacement,
+        x: Float,
+        y: Float,
+        pageW: Float,
+        pageH: Float,
+        handleRadius: Float = 0f,
+    ): SignaturePlacement {
+        // Measured from the handle frame, where the resize disc is drawn, so a small stamp doesn't jump.
+        val f = handleFrame(frame(start, pageW, pageH), handleRadius)
         val (lx, ly) = f.toLocal(x, y)
         val original = hypot(f.hw, f.hh).coerceAtLeast(1f)
         // Project onto the corner direction so the box only grows/shrinks, never skews.

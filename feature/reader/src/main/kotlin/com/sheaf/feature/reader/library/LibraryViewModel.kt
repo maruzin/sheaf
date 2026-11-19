@@ -142,6 +142,8 @@ class LibraryViewModel @Inject constructor(
                 }
             }
             runCatching {
+                // Android 8: a protected file must never reach PdfRenderer (it breaks every later one).
+                com.sheaf.feature.reader.render.PdfRendererGuard.check(context, uriString)
                 context.contentResolver.openFileDescriptor(uriString.toUri(), "r")?.use { pfd ->
                     PdfRenderer(pfd).use { renderer ->
                         if (renderer.pageCount == 0) return@use null

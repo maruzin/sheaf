@@ -259,6 +259,12 @@ fun ReaderScreen(
     // Saveable: the dialog (and its camera / gallery launchers) must survive a rotation mid-capture.
     var showSignatureDialog by rememberSaveable { mutableStateOf(false) }
     var showStampText by rememberSaveable { mutableStateOf(false) }
+    // One way into signing from every entry point (button, menu, markup toolbar): the bar with the
+    // stamps always opens; with no signature yet the dialog also offers to make one.
+    fun startSigning() {
+        viewModel.onEvent(ReaderEvent.StartSigning)
+        if (!state.hasSignature) showSignatureDialog = true
+    }
     var stampText by rememberSaveable { mutableStateOf("") }
     var showExportDialog by remember { mutableStateOf(false) }
     // The picker result arrives after the state was consumed: hold the request here meanwhile.
@@ -389,7 +395,7 @@ fun ReaderScreen(
                             }
                             HorizontalDivider()
                             DropdownMenuItem(
-                                text = { Text("Manage pages") },
+                                text = { Text("Manage pages (reorder, rotate, extract)") },
                                 onClick = {
                                     menuOpen = false
                                     state.documentId?.let { onManagePages(it) }
@@ -399,8 +405,7 @@ fun ReaderScreen(
                                 text = { Text("Sign") },
                                 onClick = {
                                     menuOpen = false
-                                    if (state.hasSignature) viewModel.onEvent(ReaderEvent.StartSigning)
-                                    else showSignatureDialog = true
+                                    startSigning()
                                 },
                             )
                             DropdownMenuItem(
@@ -537,9 +542,19 @@ fun ReaderScreen(
                         onRemove = viewModel::removeSelectedSignature,
                         activeStamp = state.activeStamp,
                         onStamp = { kind ->
-                            if (kind == SignatureStore.Stamp.Text) showStampText = true
-                            else viewModel.makeStamp(kind)
+                            when {
+                                // Tapping the active stamp's chip again stops stamping.
+                                state.activeStamp != null && stampLabel(kind, state.activeStamp) == state.activeStamp ->
+                                    viewModel.stopStamping()
+                                kind == SignatureStore.Stamp.Text -> showStampText = true
+                                else -> viewModel.makeStamp(kind)
+                            }
                         },
+                        selectedIsStamp = state.selectedSignatureId?.let { id ->
+                            state.annotationsByPage.values.flatten().firstOrNull { it.id == id }
+                                ?.let { SignaturePlacement.of(it)?.image }
+                                ?.let { image -> image !in state.savedSignatures }
+                        } ?: false,
                     )
                 } else if (state.annotating) {
                     InkToolbar(
@@ -549,10 +564,7 @@ fun ReaderScreen(
                         signatureMode = state.signatureMode,
                         onTool = { viewModel.onEvent(ReaderEvent.SetHighlighter(it)) },
                         onNote = { viewModel.onEvent(ReaderEvent.SetNoteMode(true)) },
-                        onSignature = {
-                            if (state.hasSignature) viewModel.onEvent(ReaderEvent.StartSigning)
-                            else showSignatureDialog = true
-                        },
+                        onSignature = { startSigning() },
                         onRedraw = { showSignatureDialog = true },
                         onColor = { viewModel.onEvent(ReaderEvent.SetInkColor(it)) },
                         onClearPage = { viewModel.clearPageAnnotations(state.currentPage) },
@@ -587,10 +599,7 @@ fun ReaderScreen(
                     text = { Text("Sign") },
                     icon = { Icon(Icons.Filled.Gesture, contentDescription = null) },
                     onClick = {
-                        // Always enter signing (the bar has the stamps); with no signature yet, also
-                        // offer to make one. Cancelling still leaves date / tick / cross / text ready.
-                        viewModel.onEvent(ReaderEvent.StartSigning)
-                        if (!state.hasSignature) showSignatureDialog = true
+                        startSigning()
                     },
                     modifier = Modifier.semantics { contentDescription = "Sign document" },
                 )
@@ -769,6 +778,7 @@ fun ReaderScreen(
             images = state.signatureImages,
             busy = state.signatureBusy,
             importError = state.signatureImportError,
+            offerStamps = !state.hasSignature,
             onDismiss = {
                 showSignatureDialog = false
                 viewModel.clearSignatureImportError()
@@ -852,7 +862,7 @@ fun ReaderScreen(
     }
 }
 
-private fun proLabel(text: String, isPro: Boolean): String = if (isPro) text else "$text  ·  PRO"
+private fun proLabel(text: String, isPro: Boolean): String = if (isPro) text else "$text (Pro)"
 
 @Composable
 private fun OpenPasswordDialog(error: String?, onSubmit: (String) -> Unit, onCancel: () -> Unit) {
@@ -1129,6 +1139,14 @@ private fun SearchBar(
             Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Next result")
         }
     }
+}
+
+/** The chip label a stamp kind maps to ("Text" covers any typed text). */
+private fun stampLabel(kind: SignatureStore.Stamp, active: String?): String? = when (kind) {
+    SignatureStore.Stamp.Date -> "Date"
+    SignatureStore.Stamp.Tick -> "Tick"
+    SignatureStore.Stamp.Cross -> "Cross"
+    SignatureStore.Stamp.Text -> active?.takeIf { it !in setOf("Date", "Tick", "Cross") }
 }
 
 /** Saved-state forms of the requests that wait on a system picker (plain strings survive process death). */

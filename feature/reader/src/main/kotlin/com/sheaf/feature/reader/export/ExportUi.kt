@@ -45,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.role
@@ -58,6 +59,8 @@ import java.io.File
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
 
 /** Pick an export format. Word and Excel carry a PRO label for free users. */
 @Composable
@@ -70,14 +73,27 @@ internal fun ExportDialog(isPro: Boolean, onDismiss: () -> Unit, onPick: (Export
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 ExportFormat.entries.forEach { f ->
                     val pro = !isPro && (f == ExportFormat.Word || f == ExportFormat.Excel)
-                    Text(
-                        text = if (pro) "${f.label} (Pro)" else f.label,
-                        modifier = Modifier
+                    Row(
+                        Modifier
                             .fillMaxWidth()
                             .heightIn(min = 48.dp)
                             .clickable(role = Role.Button) { onPick(f); onDismiss() }
-                            .padding(vertical = 14.dp),
-                    )
+                            .padding(vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(f.label, modifier = Modifier.weight(1f))
+                        // A badge, so the paywall is expected rather than a surprise.
+                        if (pro) {
+                            Text(
+                                "Pro",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier
+                                    .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(50))
+                                    .padding(horizontal = 10.dp, vertical = 3.dp),
+                            )
+                        }
+                    }
                 }
                 Text(
                     "PDF and JPG keep the page exactly as you see it. Word, Excel and TXT contain the text, not the layout.",
@@ -104,12 +120,9 @@ internal fun ExportReadyDialog(ready: ExportReady, onShare: () -> Unit, onSave: 
             )
         },
         confirmButton = { Button(onClick = onShare) { Text("Share") } },
-        dismissButton = {
-            Row {
-                TextButton(onClick = onDismiss) { Text("Close") }
-                TextButton(onClick = onSave) { Text("Save to phone") }
-            }
-        },
+        // Two actions (Material guidance; three wrapped badly on small phones). Back or tapping
+        // outside closes it, and the export can be made again in a tap.
+        dismissButton = { TextButton(onClick = onSave) { Text("Save to phone") } },
     )
 }
 
@@ -159,13 +172,26 @@ internal fun TextViewDialog(
     fun allText(): String =
         texts.mapIndexed { i, t -> if (texts.size > 1) "Page ${i + 1}\n$t" else t }.joinToString("\n\n")
     val hasText = texts.any { it.isNotBlank() }
-    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    // Edits live only in this screen: ask before closing throws them away.
+    val edited = texts.toList() != pages.map { it.trim() }
+    var confirmClose by remember { mutableStateOf(false) }
+    val close = { if (edited) confirmClose = true else onClose() }
+    if (confirmClose) {
+        AlertDialog(
+            onDismissRequest = { confirmClose = false },
+            title = { Text("Discard your edits?") },
+            text = { Text("Edits here aren't saved. Copy or share the text first to keep it.") },
+            confirmButton = { TextButton(onClick = { confirmClose = false; onClose() }) { Text("Discard") } },
+            dismissButton = { TextButton(onClick = { confirmClose = false }) { Text("Keep editing") } },
+        )
+    }
+    Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxSize().semantics { paneTitle = "Document text" }) {
             Column(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
                 TopAppBar(
                     title = { Text("Text") },
                     navigationIcon = {
-                        IconButton(onClick = onClose) {
+                        IconButton(onClick = close) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close text")
                         }
                     },
@@ -193,8 +219,9 @@ internal fun TextViewDialog(
                         Modifier.fillMaxSize().padding(24.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        Text("This document is a scan, so its text is part of the picture.")
-                        Text("Text recognition (OCR) reads it so you can copy, edit, translate and export it.")
+                        // True for scans and for files with no text layer (blank forms, pictures).
+                        Text("No text found in this document.")
+                        Text("If it's a scan or a photo, text recognition (OCR) can read it so you can copy, edit, translate and export it.")
                         Button(onClick = onUnlockOcr) { Text("Recognize text (Pro)") }
                     }
                     !hasText && pages.all { it.isBlank() } ->
@@ -232,8 +259,8 @@ internal fun TextViewDialog(
                                 OutlinedTextField(
                                     value = texts[i],
                                     onValueChange = { texts[i] = it },
-                                    label = { Text(label) },
-                                    modifier = Modifier.fillMaxWidth(),
+                                    // The heading above names the page; TalkBack still hears which one.
+                                    modifier = Modifier.fillMaxWidth().semantics { contentDescription = "$label text" },
                                 )
                             }
                         }

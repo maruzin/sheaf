@@ -66,12 +66,18 @@ class PagesViewModel @Inject constructor(
 
     fun aspectRatio(sourceIndex: Int): Float = source?.pageAspectRatio(sourceIndex) ?: 1.4142f
 
-    fun rotate(position: Int) = _state.update { it.copy(items = PageReducer.rotate(it.items, position)) }
+    fun rotate(position: Int) = _state.update { it.copy(items = PageReducer.rotate(it.items, position), edited = true) }
 
-    fun delete(position: Int) = _state.update { it.copy(items = PageReducer.delete(it.items, position)) }
+    fun delete(position: Int) = _state.update { it.copy(items = PageReducer.delete(it.items, position), edited = true) }
 
     fun move(position: Int, delta: Int) =
-        _state.update { it.copy(items = PageReducer.move(it.items, position, delta)) }
+        _state.update { it.copy(items = PageReducer.move(it.items, position, delta), edited = true) }
+
+    fun consumeActionError() = _state.update { it.copy(actionError = null) }
+
+    /** What the last failed action was, so Retry repeats it. */
+    var lastAction: (() -> Unit)? = null
+        private set
 
     fun setSelecting(on: Boolean) = _state.update { it.copy(selecting = on, selected = emptySet()) }
 
@@ -87,6 +93,7 @@ class PagesViewModel @Inject constructor(
     fun save() {
         val s = _state.value
         if (s.items.isEmpty()) return
+        lastAction = ::save
         writeCopy(s.items, "edited")
     }
 
@@ -98,6 +105,7 @@ class PagesViewModel @Inject constructor(
         val s = _state.value
         val picked = s.items.filter { it.sourceIndex in s.selected }
         if (picked.isEmpty()) return
+        lastAction = ::extract
         val positions = s.items.mapIndexedNotNull { i, item -> if (item.sourceIndex in s.selected) i + 1 else null }
         writeCopy(picked, PageRanges.label(positions))
     }
@@ -110,7 +118,7 @@ class PagesViewModel @Inject constructor(
             val plan = items.map { PageOp(it.sourceIndex, it.rotation) }
             val path = runCatching { editor.save(s.uri, plan) }.getOrNull()
             if (path == null) {
-                _state.update { it.copy(saving = false, error = "Couldn't save the edited PDF") }
+                _state.update { it.copy(saving = false, actionError = "Couldn't save the new PDF") }
                 return@launch
             }
             val fileUri = Uri.fromFile(File(path)).toString()
@@ -141,7 +149,8 @@ class PagesViewModel @Inject constructor(
                     savedDocumentId = newId,
                     selecting = false,
                     selected = emptySet(),
-                    error = if (newId == null) "Couldn't add the new PDF to your library" else it.error,
+                    edited = if (newId != null) false else it.edited,
+                    actionError = if (newId == null) "Couldn't add the new PDF to your library" else it.actionError,
                 )
             }
         }

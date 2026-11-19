@@ -551,6 +551,17 @@ class ReaderViewModel @Inject constructor(
 
     private data class Output(val path: String, val temp: Boolean)
 
+    /** What the copy is, for its file name: "Lease (signed).pdf", "(filled)" or "(marked up)" (as Share). */
+    private fun outputSuffix(): String {
+        val s = _state.value
+        val signed = s.annotationsByPage.values.any { list -> list.any { it.type == com.sheaf.core.domain.model.AnnotationType.Signature } }
+        return when {
+            signed -> "signed"
+            s.annotationsByPage.isEmpty() && s.formEdited -> "filled"
+            else -> "marked up"
+        }
+    }
+
     private fun flattenAndShare() {
         if (_state.value.uri.isBlank() || !_state.value.hasChanges) return
         viewModelScope.launch {
@@ -575,7 +586,7 @@ class ReaderViewModel @Inject constructor(
             _state.update { it.copy(flattening = true) }
             val out = outputPdf()
             val base = DocumentExporter.baseName(s.displayName)
-            val name = DocumentExporter.safeName(if (out?.temp == true) "$base (signed).pdf" else "$base.pdf")
+            val name = DocumentExporter.safeName(if (out?.temp == true) "$base (${outputSuffix()}).pdf" else "$base.pdf")
             _state.update {
                 it.copy(
                     flattening = false,
@@ -657,7 +668,7 @@ class ReaderViewModel @Inject constructor(
                     if (out == null) {
                         emptyList()
                     } else {
-                        val name = if (out.temp) "$base (signed).pdf" else "$base.pdf"
+                        val name = if (out.temp) "$base (${outputSuffix()}).pdf" else "$base.pdf"
                         listOfNotNull(exporter.copyForExport(out.path, name)).also {
                             if (out.temp) withContext(Dispatchers.IO) { File(out.path).delete() }
                         }
@@ -685,7 +696,7 @@ class ReaderViewModel @Inject constructor(
                                 it.copy(
                                     exporting = false,
                                     billingMessage = if (it.isPro) "No text found in this document"
-                                    else "This is a scan: its text needs OCR (Pro) before exporting",
+                                    else "No text found. If it's a scan, text recognition (Pro) can read it first",
                                     showPaywall = !it.isPro,
                                 )
                             }
@@ -1043,11 +1054,13 @@ class ReaderViewModel @Inject constructor(
         }
     }
 
-    private fun todayForForms(): String {
-        val locale = java.util.Locale.getDefault()
-        val pattern = android.text.format.DateFormat.getBestDateTimePattern(locale, "ddMMyyyy")
-        return java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern(pattern, locale))
+    /** Ends a stamping run: back to placing your signature. */
+    fun stopStamping() = _state.update {
+        it.copy(activeStamp = null, activeStampHeight = null, activeSignature = it.savedSignatures.firstOrNull(), selectedSignatureId = null)
     }
+
+    private fun todayForForms(): String =
+        com.sheaf.feature.reader.signature.FormDates.format(java.time.LocalDate.now(), java.util.Locale.getDefault())
 
     /** Removes a signature from the saved list. Documents already signed with it keep it. */
     private fun forgetSignature(name: String) {

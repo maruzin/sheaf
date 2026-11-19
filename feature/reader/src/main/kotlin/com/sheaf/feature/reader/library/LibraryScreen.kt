@@ -262,7 +262,7 @@ fun LibraryScreen(
                                 },
                             )
                             DropdownMenuItem(
-                                text = { Text(if (isPro) "Merge PDFs" else "Merge PDFs  ·  PRO") },
+                                text = { Text(if (isPro) "Merge PDFs" else "Merge PDFs (Pro)") },
                                 onClick = {
                                     menuOpen = false
                                     if (viewModel.requestMerge()) mergePicker.launch(arrayOf("application/pdf"))

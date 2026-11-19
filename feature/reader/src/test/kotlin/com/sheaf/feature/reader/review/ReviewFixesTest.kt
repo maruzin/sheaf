@@ -94,8 +94,9 @@ class ReviewFixesTest {
         // Near the bottom-right corner (resize), inside the delete zone's wider touch radius.
         val r = SignatureGestures.hitTest(list, 1L, 528f, 718f, 1000f, 1414f, handleRadius = 20f, minTouchRadius = 48f)
         assertEquals(SignatureGestures.Part.Resize, r?.part)
-        // 40 px from the delete corner: beyond delete's own reach (28 px), so not a delete.
-        val far = SignatureGestures.hitTest(list, 1L, 470f - 28f, 697f - 28f, 1000f, 1414f, handleRadius = 20f, minTouchRadius = 48f)
+        // Handles sit on a frame at least 1.6 handle radii (32 px) from the centre (500, 707).
+        // 40 px beyond the delete corner (-32, -32): outside delete's own reach (28 px), so not a delete.
+        val far = SignatureGestures.hitTest(list, 1L, 440f, 647f, 1000f, 1414f, handleRadius = 20f, minTouchRadius = 48f)
         assertTrue(far?.part != SignatureGestures.Part.Delete)
     }
 
@@ -110,5 +111,21 @@ class ReviewFixesTest {
         // A tick resized smaller stays usable (no jump to a bigger minimum).
         val smaller = SignatureGestures.nudge(tick, Nudge.Smaller, a4)
         assertTrue(smaller.w < tick.w)
+    }
+
+    @Test
+    fun `handles ring a small stamp instead of covering it`() {
+        val f = SignatureGestures.Frame(cx = 100f, cy = 100f, hw = 10f, hh = 10f, rotation = 0f)
+        val ring = SignatureGestures.handleFrame(f, handleRadius = 20f)
+        assertEquals(32f, ring.hw, 1e-3f)
+        assertEquals(32f, ring.hh, 1e-3f)
+        // A big signature keeps its own frame.
+        val big = f.copy(hw = 200f, hh = 60f)
+        assertEquals(big, SignatureGestures.handleFrame(big, 20f))
+        // Grabbing the resize disc of a small stamp and not moving doesn't change its size.
+        val tick = SignaturePlacement("sig_1.png", 0.1f, 0.1f, 0.04f, 0.04f) // 40 x 40 px on 1000 px
+        val corner = SignatureGestures.handleFrame(SignatureGestures.frame(tick, 1000f, 1414f), 20f)
+        val same = SignatureGestures.resize(tick, corner.cx + corner.hw, corner.cy + corner.hh, 1000f, 1414f, 20f)
+        assertEquals(tick.w, same.w, 1e-4f)
     }
 }

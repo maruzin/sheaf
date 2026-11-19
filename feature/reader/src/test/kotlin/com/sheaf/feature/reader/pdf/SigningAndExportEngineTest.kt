@@ -213,4 +213,56 @@ class SigningAndExportEngineTest {
 
         assertEquals(null, store.saveStamp(SignatureStore.Stamp.Text, "   "))
     }
+
+    @Test
+    fun `date stamps follow the phone's day and month order with a 4-digit year`() {
+        val d = java.time.LocalDate.of(2026, 11, 9)
+        assertEquals("09/11/2026", com.sheaf.feature.reader.signature.FormDates.format(d, java.util.Locale("en", "IE")))
+        assertEquals("11/09/2026", com.sheaf.feature.reader.signature.FormDates.format(d, java.util.Locale.US))
+        assertEquals("09.11.2026", com.sheaf.feature.reader.signature.FormDates.format(d, java.util.Locale.GERMANY))
+    }
+
+    @Test
+    fun `tick and date stamps are drawn into the exported PDF`() = runTest {
+        val tick = store.saveStamp(SignatureStore.Stamp.Tick)!!
+        val date = store.saveStamp(SignatureStore.Stamp.Date, "09/11/2026")!!
+        val source = pdf()
+        val a = SignaturePlacement.new(tick, NormPoint(0.2f, 0.3f), store.aspect(tick), 1.4142f, SignaturePlacement.STAMP_MARK_HEIGHT)
+        val b = SignaturePlacement.new(date, NormPoint(0.6f, 0.8f), store.aspect(date), 1.4142f, SignaturePlacement.STAMP_TEXT_HEIGHT)
+        val flattener = PdfBoxAnnotationFlattener(context, Dispatchers.Unconfined, store)
+        val out = flattener.flatten(
+            Uri.fromFile(source).toString(),
+            mapOf(0 to listOf(a.toAnnotation(1, 0, id = 1), b.toAnnotation(1, 0, id = 2))),
+        )
+        assertNotNull(out)
+        PDDocument.load(File(out!!)).use { d ->
+            val page = d.getPage(0)
+            val images = page.resources.xObjectNames.map { page.resources.getXObject(it) }.filterIsInstance<PDImageXObject>()
+            assertEquals("both stamps are in the page", 2, images.size)
+            assertTrue(images.all { it.cosObject.getDictionaryObject(COSName.SMASK) != null })
+        }
+    }
+
+    @Test
+    fun `an unlocked copy of a protected PDF carries no encryption`() = runTest {
+        val src = File(context.cacheDir, "locked.pdf")
+        PDDocument().use { d ->
+            d.addPage(PDPage(PDRectangle.A4))
+            d.protect(
+                com.tom_roush.pdfbox.pdmodel.encryption.StandardProtectionPolicy(
+                    "secret1", "secret1", com.tom_roush.pdfbox.pdmodel.encryption.AccessPermission(),
+                ).apply { encryptionKeyLength = 128 },
+            )
+            d.save(src)
+        }
+        val security = com.sheaf.feature.reader.security.PdfBoxSecurity(context, Dispatchers.Unconfined)
+        val out = security.decrypt(Uri.fromFile(src).toString(), "secret1")
+        assertNotNull(out)
+        val bytes = File(out!!).readBytes()
+        val text = String(bytes, Charsets.ISO_8859_1)
+        File("build/office-check").mkdirs(); File(out).copyTo(File("build/office-check/unlocked.pdf"), overwrite = true)
+        src.copyTo(File("build/office-check/locked.pdf"), overwrite = true)
+        assertTrue("no /Encrypt left in the unlocked copy", !text.contains("/Encrypt"))
+        PDDocument.load(File(out)).use { assertTrue(!it.isEncrypted) }
+    }
 }

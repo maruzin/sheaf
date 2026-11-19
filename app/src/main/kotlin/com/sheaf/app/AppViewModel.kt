@@ -118,7 +118,7 @@ class AppViewModel @Inject constructor(
             }
             if (id == null) {
                 AppLog.w("OpenWith", "An \"Open with\" file could not be imported (unreadable, empty or refused)")
-                _openError.value = "Couldn't open that file. It may be damaged, not a PDF or picture, or no longer available."
+                _openError.value = "Couldn't open that file. It may be damaged or not a PDF."
             }
             _pendingOpenDoc.value = id
         }

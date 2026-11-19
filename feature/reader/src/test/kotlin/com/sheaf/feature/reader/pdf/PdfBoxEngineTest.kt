@@ -220,4 +220,70 @@ class PdfBoxEngineTest {
             doc.save(out)
         }
     }
+
+    @Test
+    fun `form fields are read and filled values are saved into the copy`() = runTest {
+        val src = File(context.cacheDir, "form.pdf")
+        PDDocument().use { doc ->
+            val page = PDPage(PDRectangle.A4); doc.addPage(page)
+            val form = PDAcroForm(doc); doc.documentCatalog.acroForm = form
+            form.defaultResources = com.tom_roush.pdfbox.pdmodel.PDResources().apply {
+                put(com.tom_roush.pdfbox.cos.COSName.getPDFName("Helv"), PDType1Font.HELVETICA)
+            }
+            form.defaultAppearance = "/Helv 10 Tf 0 g"
+            val name = PDTextField(form).apply { partialName = "tenant" }
+            name.widgets.first().apply { rectangle = PDRectangle(72f, 700f, 200f, 20f); this.page = page }
+            page.annotations.add(name.widgets.first()); form.fields.add(name)
+            val agree = com.tom_roush.pdfbox.pdmodel.interactive.form.PDCheckBox(form).apply { partialName = "agree" }
+            agree.widgets.first().apply { rectangle = PDRectangle(72f, 650f, 14f, 14f); this.page = page }
+            page.annotations.add(agree.widgets.first()); form.fields.add(agree)
+            doc.save(src)
+        }
+        // Kept for the on-device form check before a release.
+        File("build/office-check").mkdirs(); src.copyTo(File("build/office-check/form.pdf"), overwrite = true)
+        val reader = com.sheaf.feature.reader.forms.PdfBoxFormReader(context, Dispatchers.IO)
+        val fields = reader.readFields(uriOf(src))
+        assertEquals(setOf("tenant", "agree"), fields.map { it.name }.toSet())
+        val out = reader.fillAndSave(uriOf(src), mapOf("tenant" to "Seán Ó Briain", "agree" to "true"))
+        assertNotNull(out)
+        PDDocument.load(File(out!!)).use { doc ->
+            val acro = doc.documentCatalog.acroForm
+            if (acro != null && acro.fields.isNotEmpty()) {
+                assertEquals("Seán Ó Briain", acro.getField("tenant").valueAsString)
+            } else {
+                // Flattened: the value is part of the page text now.
+                val text = com.tom_roush.pdfbox.text.PDFTextStripper().getText(doc)
+                assertTrue(text, text.contains("Briain"))
+            }
+        }
+    }
+
+    @Test
+    fun `compress shrinks a large photo page and keeps every page`() = runTest {
+        val src = File(context.cacheDir, "big-photo.pdf")
+        val rnd = java.util.Random(7)
+        val bmp = android.graphics.Bitmap.createBitmap(3000, 4000, android.graphics.Bitmap.Config.ARGB_8888)
+        // Smooth gradient with noise: compresses badly losslessly, like a phone photo.
+        val row = IntArray(3000)
+        for (y in 0 until 4000) {
+            for (x in 0 until 3000) {
+                val v = ((x + y) / 28 + rnd.nextInt(24)).coerceIn(0, 255)
+                row[x] = (0xFF shl 24) or (v shl 16) or ((255 - v) shl 8) or (v / 2)
+            }
+            bmp.setPixels(row, 0, 3000, 0, y, 3000, 1)
+        }
+        PDDocument().use { doc ->
+            repeat(2) {
+                val page = PDPage(PDRectangle.A4); doc.addPage(page)
+                val img = com.tom_roush.pdfbox.pdmodel.graphics.image.JPEGFactory.createFromImage(doc, bmp, 0.95f)
+                PDPageContentStream(doc, page).use { it.drawImage(img, 0f, 0f, page.mediaBox.width, page.mediaBox.height) }
+            }
+            doc.save(src)
+        }
+        val out = PdfBoxCompressor(context, Dispatchers.IO).compress(uriOf(src))
+        assertNotNull(out)
+        val before = src.length(); val after = File(out!!).length()
+        assertTrue("compressed $after should be well under $before", after < before * 0.7)
+        PDDocument.load(File(out)).use { assertEquals(2, it.numberOfPages) }
+    }
 }

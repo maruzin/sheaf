@@ -30,17 +30,19 @@ import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
-    private val incomingUri = mutableStateOf<String?>(null)
+    // Each "Open with" is a new event, even for the same file: a plain uri string would be equal to
+    // the last one, so opening the same file again (e.g. from Files) did nothing.
+    private val incoming = mutableStateOf<Incoming?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         // A recreated activity (rotation, process restore) still carries the original "Open with"
         // intent. It was already handled, so reading it again would import and open the file twice.
-        if (savedInstanceState == null) incomingUri.value = incomingPdfUri(intent)
+        if (savedInstanceState == null) incoming.value = incomingPdfUri(intent)?.let(::Incoming)
         setContent {
-            val uri by incomingUri
-            SheafApp(incomingUri = uri)
+            val event by incoming
+            SheafApp(incoming = event)
         }
     }
 
@@ -48,9 +50,12 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        incomingUri.value = incomingPdfUri(intent)
+        incoming.value = incomingPdfUri(intent)?.let(::Incoming)
     }
 }
+
+/** One incoming file. Not a data class on purpose: every intent is a distinct event. */
+private class Incoming(val uri: String)
 
 /** Extracts a PDF uri from an "Open with" (VIEW) or share (SEND) intent, if present. */
 private fun incomingPdfUri(intent: Intent?): String? {
@@ -66,9 +71,9 @@ private fun incomingPdfUri(intent: Intent?): String? {
 }
 
 @Composable
-private fun SheafApp(incomingUri: String? = null, appViewModel: AppViewModel = hiltViewModel()) {
+private fun SheafApp(incoming: Incoming? = null, appViewModel: AppViewModel = hiltViewModel()) {
     val state by appViewModel.state.collectAsStateWithLifecycle()
-    LaunchedEffect(incomingUri) { if (incomingUri != null) appViewModel.openIncoming(incomingUri) }
+    LaunchedEffect(incoming) { incoming?.let { appViewModel.openIncoming(it.uri) } }
     SheafTheme(dynamicColor = state.dynamicColor) {
         if (state.loading) {
             Box(

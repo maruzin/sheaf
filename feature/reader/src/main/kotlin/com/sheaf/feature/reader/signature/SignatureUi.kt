@@ -117,6 +117,10 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.ButtonDefaults
 
 private val INK_COLOURS = listOf(0xFF15171C.toInt() to "Black", 0xFF1F3FA8.toInt() to "Blue")
 
@@ -130,6 +134,8 @@ internal fun SignatureDialog(
     images: Map<String, Bitmap>,
     busy: Boolean = false,
     importError: String? = null,
+    /** First run: say that dates, ticks and text don't need a signature. */
+    offerStamps: Boolean = false,
     onDismiss: () -> Unit,
     onSaveDrawn: (strokes: List<List<NormPoint>>, padW: Float, padH: Float, lineWidthPx: Float, colorArgb: Int) -> Unit,
     onImport: (Uri) -> Unit,
@@ -167,6 +173,11 @@ internal fun SignatureDialog(
                 TabRow(selectedTabIndex = tab, modifier = Modifier.padding(top = 8.dp)) {
                     tabs.forEachIndexed { i, label ->
                         Tab(selected = tab == i, onClick = { tab = i }, text = { Text(label) })
+                    }
+                }
+                if (offerStamps) {
+                    TextButton(onClick = onDismiss, modifier = Modifier.padding(horizontal = 12.dp)) {
+                        Text("Skip: just add a date, tick, cross or text")
                     }
                 }
                 // Scrolls at large font sizes and in landscape, so the buttons are always reachable.
@@ -446,6 +457,7 @@ internal fun SignatureBar(
     onRemove: () -> Unit = {},
     activeStamp: String? = null,
     onStamp: (SignatureStore.Stamp) -> Unit = {},
+    selectedIsStamp: Boolean = false,
 ) {
     Column(Modifier.fillMaxWidth()) {
         Row(
@@ -472,12 +484,27 @@ internal fun SignatureBar(
                         onClick = { onChoose(name) },
                     )
                 }
-                OutlinedButton(onClick = onNew) {
-                    Icon(Icons.Filled.Add, contentDescription = null)
-                    Text("New")
+if (saved.isEmpty()) {
+                    // First run: making a signature is the main action, not leaving.
+                    Button(onClick = onNew) {
+                        Icon(Icons.Filled.Add, contentDescription = null)
+                        Text("Create signature")
+                    }
+                } else {
+                    OutlinedButton(onClick = onNew) {
+                        Icon(Icons.Filled.Add, contentDescription = null)
+                        Text("New signature")
+                    }
                 }
             }
-            Button(onClick = onDone) { Text("Done") }
+            FilledTonalButton(
+                onClick = onDone,
+                // Brand tone (the theme leaves M3's lavender secondary container unmapped).
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                ),
+            ) { Text("Done") }
         }
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 16.dp))
         // Stamps: always on their own row, so they're never pushed off screen by the adjust buttons.
@@ -503,12 +530,10 @@ internal fun SignatureBar(
         // Every drag on the page has a button here too: for TalkBack and Switch Access users, and for
         // anyone who finds small, precise drags hard. Always shown (disabled until something is
         // selected) so the bar never changes height and the page never jumps under the finger.
-        run {
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                val what = if (activeStamp != null) "stamp" else "signature"
+        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            // The noun follows what is actually selected, not which stamp is active.
+            val what = if (selectedIsStamp) "stamp" else "signature"
+            Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
                 NudgeButton(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Move $what left", enabled = hasSelection) { onNudge(SignatureGestures.Nudge.Left) }
                 NudgeButton(Icons.Filled.KeyboardArrowUp, "Move $what up", enabled = hasSelection) { onNudge(SignatureGestures.Nudge.Up) }
                 NudgeButton(Icons.Filled.KeyboardArrowDown, "Move $what down", enabled = hasSelection) { onNudge(SignatureGestures.Nudge.Down) }
@@ -517,14 +542,24 @@ internal fun SignatureBar(
                 NudgeButton(Icons.Filled.ZoomIn, "Make $what bigger", enabled = hasSelection) { onNudge(SignatureGestures.Nudge.Bigger) }
                 NudgeButton(Icons.AutoMirrored.Filled.RotateLeft, "Turn $what left", enabled = hasSelection) { onNudge(SignatureGestures.Nudge.TurnLeft) }
                 NudgeButton(Icons.AutoMirrored.Filled.RotateRight, "Turn $what right", enabled = hasSelection) { onNudge(SignatureGestures.Nudge.TurnRight) }
-                NudgeButton(Icons.Filled.Delete, "Remove $what", enabled = hasSelection, onClick = onRemove)
+            }
+            // Remove is the one people look for: always on screen, never scrolled away.
+            VerticalDivider(Modifier.height(28.dp))
+            IconButton(onClick = onRemove, enabled = hasSelection) {
+                Icon(
+                    Icons.Filled.Delete,
+                    contentDescription = "Remove $what",
+                    tint = if (hasSelection) MaterialTheme.colorScheme.error else LocalContentColor.current.copy(alpha = 0.38f),
+                )
             }
         }
         Text(
             when {
-                hasSelection && activeStamp != null -> "Stamp selected. Adjust it, or tap the page to add another."
+                hasSelection && activeStamp != null ->
+                    "Selected. Adjust it, or tap the page to add another. Tap ${chipName(activeStamp)} again to stop."
                 hasSelection -> "Signature selected. Drag it or use the buttons to move, resize or turn it."
-                activeStamp != null -> "Tap each place the ${if (activeStamp in setOf("Date", "Tick", "Cross")) activeStamp.lowercase() else "text"} goes, or use Place on this page."
+                activeStamp != null ->
+                    "Tap each place the ${noun(activeStamp)} goes. Tap ${chipName(activeStamp)} again to stop."
                 active == null -> "Create your signature, or add a date, tick, cross or text."
                 else -> "Tap the page where the signature goes, or use Place on this page."
             },
@@ -559,6 +594,10 @@ internal fun StampTextDialog(initial: String, onDismiss: () -> Unit, onStamp: (S
     )
 }
 
+private val MARKS = setOf("Date", "Tick", "Cross")
+private fun chipName(active: String) = if (active in MARKS) active else "Text"
+private fun noun(active: String) = if (active in MARKS) active.lowercase() else "text"
+
 @Composable
 private fun StampChip(label: String, selected: Boolean, icon: @Composable () -> Unit, onClick: () -> Unit) {
     FilterChip(
@@ -566,6 +605,12 @@ private fun StampChip(label: String, selected: Boolean, icon: @Composable () -> 
         onClick = onClick,
         label = { Text(label) },
         leadingIcon = icon,
+        // Brand colour for the active stamp (the theme leaves M3's lavender secondary unmapped).
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        ),
         modifier = Modifier.padding(horizontal = 3.dp).semantics { contentDescription = "$label stamp" },
     )
 }
@@ -615,6 +660,8 @@ internal fun DrawScope.drawSignatures(
                 )
             }
             if (ann.id == selectedId) {
+                // Handles ring a small stamp rather than covering it (same frame the touch test uses).
+                @Suppress("NAME_SHADOWING") val f = SignatureGestures.handleFrame(f, handleRadius)
                 val left = f.cx - f.hw
                 val top = f.cy - f.hh
                 val frameSize = androidx.compose.ui.geometry.Size(f.hw * 2, f.hh * 2)
@@ -658,16 +705,28 @@ private fun DrawScope.handleDisc(centre: Offset, r: Float, fill: Color, rim: Flo
 private val HANDLE_BLUE = Color(0xFF1A56DB)
 private val HANDLE_RED = Color(0xFFC5221F)
 
+/** A "turn" arrow: an open arc with an arrowhead, so the knob reads as rotate, not as a spinner. */
 private fun DrawScope.drawArcHint(centre: Offset, r: Float, colour: Color) {
+    val start = -30f
+    val sweep = 270f
+    val w = 1.5f.dp.toPx()
     drawArc(
         color = colour,
-        startAngle = -60f,
-        sweepAngle = 270f,
+        startAngle = start,
+        sweepAngle = sweep,
         useCenter = false,
         topLeft = centre - Offset(r, r),
         size = androidx.compose.ui.geometry.Size(r * 2, r * 2),
-        style = Stroke(width = 1.5f.dp.toPx(), cap = StrokeCap.Round),
+        style = Stroke(width = w, cap = StrokeCap.Round),
     )
+    // Arrowhead at the arc's end, pointing along the turn (clockwise).
+    val end = Math.toRadians((start + sweep).toDouble())
+    val tip = centre + Offset((r * kotlin.math.cos(end)).toFloat(), (r * kotlin.math.sin(end)).toFloat())
+    val head = r * 0.7f
+    val dir = end + Math.PI / 2 // tangent, clockwise
+    fun at(angle: Double) = tip - Offset((head * kotlin.math.cos(angle)).toFloat(), (head * kotlin.math.sin(angle)).toFloat())
+    drawLine(colour, tip, at(dir - 0.5), w, cap = StrokeCap.Round)
+    drawLine(colour, tip, at(dir + 0.5), w, cap = StrokeCap.Round)
 }
 
 /**
@@ -724,7 +783,8 @@ internal suspend fun PointerInputScope.signatureGestures(
                 val start = target.second
                 last = when (hit.part) {
                     SignatureGestures.Part.Body -> SignatureGestures.move(start, delta.x, delta.y, w, h)
-                    SignatureGestures.Part.Resize -> SignatureGestures.resize(start, change.position.x, change.position.y, w, h)
+                    SignatureGestures.Part.Resize ->
+                        SignatureGestures.resize(start, change.position.x, change.position.y, w, h, handleRadius)
                     SignatureGestures.Part.Rotate -> SignatureGestures.rotate(start, change.position.x, change.position.y, w, h)
                     SignatureGestures.Part.Delete -> null
                 }

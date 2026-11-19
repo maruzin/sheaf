@@ -4,6 +4,44 @@ Running engineering log. Newest first. Every non-obvious decision gets one line 
 
 ---
 
+## 1.3.0 (versionCode 12), 2026-11-19: release-readiness sprint (QA plan, UX review, stress, Android 8)
+vc11 never uploaded. A full QA pass before release: qa-engineer wrote a 150-case plan
+(vault: Sheaf - QA Test Plan 1.3.0), ui-ux-designer reviewed the new surfaces, then stress, Office,
+Android 8.0 and TalkBack-route testing. Every defect found is fixed below.
+- **Android 8.0 / 8.1 (platform PdfRenderer bug, fixed in Android 9):** after PdfRenderer failed on a
+  password-protected PDF, every later PdfRenderer in the process threw "password required" (so every
+  file, Sheaf's own signed and edited copies included, asked for a password) and the half-built renderer
+  crashed the app (SIGSEGV in libpdfium, FinalizerDaemon). New `PdfRendererGuard`: on Android < 9 each
+  file is loaded with PdfBox first and a protected or broken file never reaches PdfRenderer; used by the
+  reader, Manage pages and library thumbnails (thumbnails were the second leak). Regression test
+  `PlatformRendererProbeTest` fails without the guard on Android 8 and passes with it.
+- **"Open with" (singleTask):** standard launch mode stacked a new copy of the app per incoming file,
+  and re-opening the task's own file only brought it to the front (nothing opened). MainActivity is
+  singleTask and each incoming file is a distinct event, so the same file can be opened again.
+- **UX review fixes:** handles ring a small stamp instead of covering it (minimum handle frame, same
+  frame for drawing, touch and resize) and the rotate knob has a real turn arrow; tapping the active
+  stamp chip stops stamping (hint says so); every Sign entry point opens the bar, and the dialog offers
+  "Skip: just add a date, tick, cross or text"; "Create signature" is the primary action on first run,
+  Done is tonal; Remove is pinned outside the scrolling adjust row in error red; Manage pages: Back exits
+  select mode, asks before discarding unsaved changes, save/extract errors show with Retry instead of
+  replacing the grid, "Extract pages" button and menu "Manage pages (reorder, rotate, extract)"; brand
+  colours on chips and Done (theme's M3 secondary was unmapped lavender); export list shows a Pro badge;
+  export-ready dialog has two actions; text view asks before discarding edits and no longer repeats
+  each page label.
+- **Wording:** corrupt-file message fits a toast; "(Pro)" everywhere instead of "· PRO"; a file with
+  no text layer (a blank form) no longer claims to be "a scan"; Save to phone and PDF export name the copy
+  like Share does ("(filled)" for a filled form, not "(signed)").
+- **Tests:** 113 unit (7 new: date format in 3 locales, stamps in exported PDF, unlocked copy has no
+  encryption, handle frame, office samples, form fill saved into the copy, compress shrinks a photo page); 14 device tests (3 new: markup survives restart, signing by
+  accessibility actions alone, Android 8 renderer guard), passing on Android 15 and Android 8.0, twice each.
+- **Checked by hand on the release build:** 500-page PDF (opens in 122 ms, fling through, search), A0
+  drawing, corrupt file, process death (restored to the same page), offline (airplane mode), rotation
+  inside the Save picker (file written, not 0 bytes), Android 8.0 open / stamp / Save to phone / JPG
+  export / protected PDF, Word and Excel output opened in Microsoft Excel and LibreOffice, highlighter,
+  3-page JPG export to Pictures/Sheaf, Share sends "(signed)" copy, form fill (text + checkbox) saved and
+  shared, 10,000-event monkey on Android 15 and Android 8.0 (0 crashes, 0 ANRs), cold start 96-130 ms
+  (emulator). Release notes: store-assets/RELEASE_NOTES.md.
+
 ## 1.3.0 (versionCode 11), 2026-11-19: fill-and-sign stamps, extract pages
 Top two items from the 1.2.0 review roadmap.
 - **Stamps** (signing bar, always visible, free): today's date (the phone's own date order with a 4-digit

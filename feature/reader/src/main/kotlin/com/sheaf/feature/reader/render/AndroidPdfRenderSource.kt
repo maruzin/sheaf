@@ -135,6 +135,8 @@ class AndroidPdfRenderSource private constructor(
         private val io: CoroutineDispatcher,
     ) : PdfRenderSourceFactory {
         override suspend fun open(uri: String, password: String?): PdfRenderSource = withContext(io) {
+            // Android 8 PdfRenderer bug: never hand it a protected or broken file (see the guard).
+            PdfRendererGuard.check(context, uri)
             val pfd = context.contentResolver.openFileDescriptor(uri.toUri(), "r")
                 ?: error("Could not open $uri")
             // PdfRenderer throws on corrupt or password-protected files; close the descriptor then,
