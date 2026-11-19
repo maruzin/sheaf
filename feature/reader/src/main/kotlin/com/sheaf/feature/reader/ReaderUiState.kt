@@ -49,6 +49,8 @@ data class ReaderUiState(
     val signatureImages: Map<String, Bitmap> = emptyMap(),
     val selectedSignatureId: Long? = null,
     val signatureBusy: Boolean = false,
+    /** Why the last signature photo couldn't be used; shown in the signature dialog with a retry. */
+    val signatureImportError: String? = null,
     val annotationsListVisible: Boolean = false,
     val annotationsByPage: Map<Int, List<Annotation>> = emptyMap(),
     val canUndo: Boolean = false,

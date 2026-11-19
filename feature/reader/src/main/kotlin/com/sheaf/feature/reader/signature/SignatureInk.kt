@@ -33,9 +33,12 @@ object SignatureInk {
     fun extract(argb: IntArray, width: Int, height: Int): Result {
         require(argb.size == width * height) { "pixel count mismatch" }
         if (width < 8 || height < 8) return Result.NoInk
-        val lum = FloatArray(argb.size) { i -> luminance(argb[i]) }
-        val paper = paperBrightness(lum, width, height)
-        val norm = FloatArray(lum.size) { i -> (lum[i] / paper[i].coerceAtLeast(1f) * 255f).coerceIn(0f, 255f) }
+        // One float buffer, evened out in place, keeps peak memory low on large photos.
+        val norm = FloatArray(argb.size) { i -> luminance(argb[i]) }
+        run {
+            val paper = paperBrightness(norm, width, height)
+            for (i in norm.indices) norm[i] = (norm[i] / paper[i].coerceAtLeast(1f) * 255f).coerceIn(0f, 255f)
+        }
 
         val t = otsu(norm)
         // Ink and paper must differ clearly, or this is not a photo of pen on paper.

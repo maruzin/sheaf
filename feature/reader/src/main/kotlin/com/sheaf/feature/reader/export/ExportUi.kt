@@ -35,6 +35,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -42,6 +45,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -50,6 +55,9 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
 import java.io.File
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
 
 /** Pick an export format. Word and Excel carry a PRO label for free users. */
 @Composable
@@ -58,15 +66,16 @@ internal fun ExportDialog(isPro: Boolean, onDismiss: () -> Unit, onPick: (Export
         onDismissRequest = onDismiss,
         title = { Text("Export as") },
         text = {
-            Column {
+            // Scrolls at large font sizes and in landscape.
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 ExportFormat.entries.forEach { f ->
                     val pro = !isPro && (f == ExportFormat.Word || f == ExportFormat.Excel)
                     Text(
-                        text = if (pro) "${f.label}  ·  PRO" else f.label,
+                        text = if (pro) "${f.label} (Pro)" else f.label,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .semantics { role = Role.Button }
-                            .clickable { onPick(f); onDismiss() }
+                            .heightIn(min = 48.dp)
+                            .clickable(role = Role.Button) { onPick(f); onDismiss() }
                             .padding(vertical = 14.dp),
                     )
                 }
@@ -95,7 +104,12 @@ internal fun ExportReadyDialog(ready: ExportReady, onShare: () -> Unit, onSave: 
             )
         },
         confirmButton = { Button(onClick = onShare) { Text("Share") } },
-        dismissButton = { TextButton(onClick = onSave) { Text("Save to phone") } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onDismiss) { Text("Close") }
+                TextButton(onClick = onSave) { Text("Save to phone") }
+            }
+        },
     )
 }
 
@@ -139,14 +153,14 @@ internal fun TextViewDialog(
     onUnlockOcr: () -> Unit,
 ) {
     val context = LocalContext.current
-    val initial = remember(pages) {
-        pages.mapIndexed { i, t -> if (pages.size > 1) "— Page ${i + 1} —\n${t.trim()}" else t.trim() }
-            .joinToString("\n\n")
-            .take(MAX_CHARS)
-    }
-    var text by remember(initial) { mutableStateOf(initial) }
+    // One editable field per page: a single field holding a whole long document re-lays out every
+    // character on each keystroke and freezes the phone. Per page it stays instant.
+    val texts = remember(pages) { mutableStateListOf<String>().apply { addAll(pages.map { it.trim() }) } }
+    fun allText(): String =
+        texts.mapIndexed { i, t -> if (texts.size > 1) "Page ${i + 1}\n$t" else t }.joinToString("\n\n")
+    val hasText = texts.any { it.isNotBlank() }
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxSize()) {
+        Surface(Modifier.fillMaxSize().semantics { paneTitle = "Document text" }) {
             Column(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
                 TopAppBar(
                     title = { Text("Text") },
@@ -156,14 +170,13 @@ internal fun TextViewDialog(
                         }
                     },
                     actions = {
-                        val enabled = text.isNotBlank()
-                        IconButton(onClick = { copyText(context, text) }, enabled = enabled) {
+                        IconButton(onClick = { copyText(context, allText()) }, enabled = hasText) {
                             Icon(Icons.Filled.ContentCopy, contentDescription = "Copy all text")
                         }
-                        IconButton(onClick = { translateText(context, text) }, enabled = enabled) {
+                        IconButton(onClick = { translateText(context, allText()) }, enabled = hasText) {
                             Icon(Icons.Filled.Translate, contentDescription = "Translate")
                         }
-                        IconButton(onClick = { shareText(context, text, title) }, enabled = enabled) {
+                        IconButton(onClick = { shareText(context, allText(), title) }, enabled = hasText) {
                             Icon(Icons.Filled.Share, contentDescription = "Share text")
                         }
                     },
@@ -182,25 +195,48 @@ internal fun TextViewDialog(
                     ) {
                         Text("This document is a scan, so its text is part of the picture.")
                         Text("Text recognition (OCR) reads it so you can copy, edit, translate and export it.")
-                        Button(onClick = onUnlockOcr) { Text("Recognize text  ·  PRO") }
+                        Button(onClick = onUnlockOcr) { Text("Recognize text (Pro)") }
                     }
-                    initial.isBlank() -> Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-                        Text("No text found in this document.")
-                    }
-                    else -> Column(Modifier.fillMaxSize().padding(12.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                    !hasText && pages.all { it.isBlank() } ->
+                        Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                            Text("No text found in this document.")
+                        }
+                    else -> LazyColumn(
+                        Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        item {
                             Text(
                                 "Edit the text, then copy, translate or share it. The PDF itself isn't changed.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.weight(1f),
                             )
                         }
-                        OutlinedTextField(
-                            value = text,
-                            onValueChange = { text = it },
-                            modifier = Modifier.fillMaxWidth().weight(1f).padding(top = 8.dp),
-                        )
+                        items(texts.size) { i ->
+                            val label = if (texts.size > 1) "Page ${i + 1}" else "Document text"
+                            Column {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        label,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        modifier = Modifier.weight(1f).semantics { heading() },
+                                    )
+                                    IconButton(onClick = { copyText(context, texts[i]) }, enabled = texts[i].isNotBlank()) {
+                                        Icon(Icons.Filled.ContentCopy, contentDescription = "Copy $label")
+                                    }
+                                    IconButton(onClick = { translateText(context, texts[i]) }, enabled = texts[i].isNotBlank()) {
+                                        Icon(Icons.Filled.Translate, contentDescription = "Translate $label")
+                                    }
+                                }
+                                OutlinedTextField(
+                                    value = texts[i],
+                                    onValueChange = { texts[i] = it },
+                                    label = { Text(label) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -208,20 +244,41 @@ internal fun TextViewDialog(
     }
 }
 
-private const val MAX_CHARS = 300_000
+/**
+ * Clipboard and share hand text over in one system call, which fails above roughly 1 MB; long
+ * documents are capped and the user is told.
+ */
+private const val MAX_HANDOFF_CHARS = 100_000
+
+/** Google Translate accepts this much at once. */
+private const val MAX_TRANSLATE_CHARS = 5_000
+
+private fun capped(context: Context, text: String, max: Int, what: String): String {
+    if (text.length <= max) return text
+    Toast.makeText(context, "$what the first ${"%,d".format(max)} characters", Toast.LENGTH_LONG).show()
+    return text.take(max)
+}
 
 private fun copyText(context: Context, text: String) {
     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager ?: return
-    cm.setPrimaryClip(ClipData.newPlainText("Text", text))
+    val clip = ClipData.newPlainText("Text", capped(context, text, MAX_HANDOFF_CHARS, "Copied"))
+    // Document text can be private: keep it out of Android 13+'s clipboard preview.
+    clip.description.extras = android.os.PersistableBundle().apply {
+        putBoolean("android.content.extra.IS_SENSITIVE", true)
+    }
+    if (runCatching { cm.setPrimaryClip(clip) }.isFailure) {
+        Toast.makeText(context, "Couldn't copy that much text", Toast.LENGTH_LONG).show()
+        return
+    }
     // Android 13+ shows its own "Copied" confirmation.
-    if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) {
+    if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU && text.length <= MAX_HANDOFF_CHARS) {
         Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
     }
 }
 
 private fun shareText(context: Context, text: String, title: String) {
     val send = Intent(Intent.ACTION_SEND).setType("text/plain")
-        .putExtra(Intent.EXTRA_TEXT, text)
+        .putExtra(Intent.EXTRA_TEXT, capped(context, text, MAX_HANDOFF_CHARS, "Sharing"))
         .putExtra(Intent.EXTRA_SUBJECT, title)
     runCatching { context.startActivity(Intent.createChooser(send, "Share text")) }
 }
@@ -234,7 +291,7 @@ private fun shareText(context: Context, text: String, title: String) {
 private fun translateText(context: Context, text: String) {
     val translate = Intent(Intent.ACTION_PROCESS_TEXT).setType("text/plain")
         .setPackage(TRANSLATE_PACKAGE)
-        .putExtra(Intent.EXTRA_PROCESS_TEXT, text.take(5000))
+        .putExtra(Intent.EXTRA_PROCESS_TEXT, capped(context, text, MAX_TRANSLATE_CHARS, "Translating"))
         .putExtra(Intent.EXTRA_PROCESS_TEXT_READONLY, true)
     if (runCatching { context.startActivity(translate) }.isSuccess) return
     Toast.makeText(context, "Install Google Translate to translate text", Toast.LENGTH_LONG).show()

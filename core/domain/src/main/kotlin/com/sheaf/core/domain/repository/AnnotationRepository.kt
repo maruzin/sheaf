@@ -9,4 +9,7 @@ interface AnnotationRepository {
     suspend fun upsert(annotation: Annotation): Long
     suspend fun delete(id: Long)
     suspend fun clearPage(documentId: Long, pageIndex: Int)
+
+    /** Image file names of every signature placed on any document. */
+    suspend fun signatureImagesInUse(): Set<String>
 }

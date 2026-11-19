@@ -65,13 +65,17 @@ data class SignaturePlacement(
         )
 
     /**
-     * Same placement, moved so the whole (unturned) box stays on a page of [pageAspect] = height /
+     * Same placement, moved so the whole box, as turned, stays on a page of [pageAspect] = height /
      * width, as far as it fits; a box bigger than the page is centred on it.
      */
     fun clampedToPage(pageAspect: Float = 0f): SignaturePlacement {
         if (pageAspect <= 0f) return copy(cx = cx.coerceIn(0f, 1f), cy = cy.coerceIn(0f, 1f))
-        val hw = w / 2f
-        val hh = h / 2f / pageAspect
+        // Half-extents of the turned box's bounding box, in page-width units.
+        val rad = Math.toRadians(rotation.toDouble())
+        val c = kotlin.math.abs(cos(rad).toFloat())
+        val s = kotlin.math.abs(sin(rad).toFloat())
+        val hw = (w * c + h * s) / 2f
+        val hh = (w * s + h * c) / 2f / pageAspect
         fun fit(v: Float, half: Float) = if (half >= 0.5f) 0.5f else v.coerceIn(half, 1f - half)
         return copy(cx = fit(cx, hw), cy = fit(cy, hh))
     }

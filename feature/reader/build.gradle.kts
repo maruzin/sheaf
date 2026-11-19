@@ -9,6 +9,7 @@ android {
 dependencies {
     implementation(project(":core:data"))
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.exifinterface)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material.icons.extended)
     // Text engine for full-text search + (later) outline extraction.

@@ -456,4 +456,6 @@ private class InMemoryAnnotations : AnnotationRepository {
         rows.values.removeAll { it.pageIndex == pageIndex }
         flow.value = rows.values.toList()
     }
+    override suspend fun signatureImagesInUse(): Set<String> =
+        rows.values.mapNotNull { it.note?.substringBeforeLast('@') }.toSet()
 }

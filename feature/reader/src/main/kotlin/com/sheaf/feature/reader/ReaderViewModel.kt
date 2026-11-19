@@ -33,6 +33,7 @@ import com.sheaf.feature.reader.search.TextSearch
 import com.sheaf.core.domain.tabs.OpenTabsRepository
 import com.sheaf.feature.reader.export.DocumentExporter
 import com.sheaf.feature.reader.export.ExportFormat
+import com.sheaf.feature.reader.signature.SignatureGestures
 import com.sheaf.feature.reader.signature.SignaturePlacement
 import com.sheaf.feature.reader.signature.SignatureStore
 import com.sheaf.feature.reader.signature.SignatureStrokes
@@ -81,6 +82,9 @@ class ReaderViewModel @Inject constructor(
     private var source: PdfRenderSource? = null
 
     // Declared before init {}: the collectors started there can emit immediately and touch these.
+    private var signaturesSwept = false
+    private var textViewJob: Job? = null
+    private var ocrTextCache: List<String>? = null
     private var openPassword: String? = null
     private var openJob: Job? = null
     private var searchJob: Job? = null
@@ -154,7 +158,11 @@ class ReaderViewModel @Inject constructor(
             is ReaderEvent.Export -> export(event.format)
             ReaderEvent.ConsumeExport -> _state.update { it.copy(exportReady = null) }
             ReaderEvent.OpenTextView -> openTextView()
-            ReaderEvent.CloseTextView -> _state.update { it.copy(textView = null) }
+            ReaderEvent.CloseTextView -> {
+                // Stop a slow OCR pass nobody is waiting for.
+                textViewJob?.cancel()
+                _state.update { it.copy(textView = null) }
+            }
             ReaderEvent.ToggleFormMode -> _state.update { it.copy(formMode = !it.formMode) }
             is ReaderEvent.SetFormValue ->
                 _state.update { it.copy(formValues = it.formValues + (event.name to event.value)) }
@@ -252,6 +260,7 @@ class ReaderViewModel @Inject constructor(
             ratioJob = viewModelScope.launch { opened.ratioVersion.collect { _ratioVersion.value = it } }
             textUri = renderUri
             pageTextCache = null
+            ocrTextCache = null
             runCatching { repository.markOpened(documentId) }
             runCatching { openTabs.open(documentId) }
             // Protected PDFs are imported before they can be counted (page count 0): fill it in now.
@@ -511,10 +520,11 @@ class ReaderViewModel @Inject constructor(
      * drawn in, with a protected document's password re-applied. [Output.temp] is false when nothing
      * changed (the original file is used as is). Null on failure.
      */
-    private suspend fun outputPdf(): Output? {
+    private suspend fun outputPdf(protect: Boolean = true): Output? {
         val s = _state.value
         val base = textUri.ifBlank { s.uri }
-        if (!s.hasChanges) return Output(s.uri, temp = false)
+        // [protect] = false: for rendering pictures, which can't open a protected file (and aren't protected).
+        if (!s.hasChanges) return Output(if (protect) s.uri else base, temp = false)
         var current = base
         var temp: String? = null
         if (s.formEdited) {
@@ -527,7 +537,9 @@ class ReaderViewModel @Inject constructor(
             temp?.let { File(it).delete() }
             temp = flat ?: return null
         }
-        val kept = keepProtection(temp ?: return Output(s.uri, temp = false)) ?: return null
+        val plain = temp ?: return Output(if (protect) s.uri else base, temp = false)
+        if (!protect) return Output(plain, temp = true)
+        val kept = keepProtection(plain) ?: return null
         return Output(kept, temp = true)
     }
 
@@ -647,12 +659,13 @@ class ReaderViewModel @Inject constructor(
                 }
                 ExportFormat.Jpg -> {
                     // Pages as they leave the app: signatures, markup and form values included.
-                    val out = outputPdf()
+                    // Rendered from the unlocked copy: a picture can't carry the PDF's password.
+                    val out = outputPdf(protect = false)
                     if (out == null) {
                         emptyList()
                     } else {
                         val src = if (out.temp) Uri.fromFile(File(out.path)).toString() else out.path
-                        exporter.pagesToJpg(src, base, openPassword).also {
+                        exporter.pagesToJpg(src, base).also {
                             if (out.temp) withContext(Dispatchers.IO) { File(out.path).delete() }
                         }
                     }
@@ -682,7 +695,13 @@ class ReaderViewModel @Inject constructor(
                 it.copy(
                     exporting = false,
                     exportReady = files.takeIf { f -> f.isNotEmpty() }?.let { f -> ExportReady(f, format) },
-                    billingMessage = if (files.isEmpty()) "Couldn't export the document" else it.billingMessage,
+                    billingMessage = when {
+                        files.isEmpty() -> "Couldn't export the document"
+                        // Only a PDF keeps the password; say so rather than surprise anyone.
+                        openPassword != null && format != ExportFormat.Pdf ->
+                            "Heads up: ${format.label} files aren't password-protected"
+                        else -> it.billingMessage
+                    },
                 )
             }
         }
@@ -696,13 +715,23 @@ class ReaderViewModel @Inject constructor(
         val uri = textUri.ifBlank { _state.value.uri }
         val texts = pageTexts(uri) ?: return null
         if (texts.any { it.isNotBlank() } || !allowOcr) return texts
-        return runCatching { ocr.recognizeText(uri) }.getOrNull() ?: texts
+        ocrTextCache?.let { return it }
+        val recognized = try {
+            ocr.recognizeText(uri)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+        // OCR of a whole scan is slow: remember it for the next export or text view.
+        return recognized?.also { ocrTextCache = it } ?: texts
     }
 
     private fun openTextView() {
         if (_state.value.uri.isBlank()) return
         _state.update { it.copy(textView = TextViewState(loading = true)) }
-        viewModelScope.launch {
+        textViewJob?.cancel()
+        textViewJob = viewModelScope.launch {
             val texts = documentText(allowOcr = _state.value.isPro).orEmpty()
             val needsOcr = texts.all { it.isBlank() } && !_state.value.isPro
             if (_state.value.textView == null) return@launch // closed while loading
@@ -747,7 +776,11 @@ class ReaderViewModel @Inject constructor(
         annotationsStarted = true
         viewModelScope.launch {
             annotationRepo.observeForDocument(documentId).collect { list ->
-                _state.update { it.copy(annotationsByPage = list.groupBy { a -> a.pageIndex }) }
+                _state.update {
+                    // Undo / redo can remove the selected signature: drop a selection that no longer exists.
+                    val selected = it.selectedSignatureId?.takeIf { id -> list.any { a -> a.id == id } }
+                    it.copy(annotationsByPage = list.groupBy { a -> a.pageIndex }, selectedSignatureId = selected)
+                }
                 loadSignatureImages(list.mapNotNull { a -> SignaturePlacement.of(a)?.image }.toSet())
             }
         }
@@ -872,6 +905,22 @@ class ReaderViewModel @Inject constructor(
             )
         }
         loadSignatureImages(names)
+        if (!signaturesSwept) {
+            signaturesSwept = true
+            sweepSignatures(names.toSet())
+        }
+    }
+
+    /** Deletes signature images that are neither saved nor placed on any document. */
+    private fun sweepSignatures(saved: Set<String>, immediately: Boolean = false) {
+        viewModelScope.launch {
+            runCatching {
+                val keep = saved + _state.value.savedSignatures + annotationRepo.signatureImagesInUse() +
+                    listOfNotNull(_state.value.activeSignature)
+                // A signature the user just removed goes now; otherwise only files older than a few minutes.
+                if (immediately) signatures.sweep(keep, now = Long.MAX_VALUE) else signatures.sweep(keep)
+            }.onFailure { AppLog.e("Signature", "Cleaning up unused signatures failed", it) }
+        }
     }
 
     private suspend fun loadSignatureImages(names: Collection<String>) {
@@ -897,17 +946,18 @@ class ReaderViewModel @Inject constructor(
     /** Cuts a signature out of a photo or picture and gets ready to place it. */
     fun importSignature(uri: Uri) {
         viewModelScope.launch {
-            _state.update { it.copy(signatureBusy = true) }
+            _state.update { it.copy(signatureBusy = true, signatureImportError = null) }
             when (val r = signatures.import(uri)) {
                 is SignatureStore.ImportResult.Ok -> adoptSignature(r.name)
                 SignatureStore.ImportResult.NoInk -> _state.update {
                     it.copy(
                         signatureBusy = false,
-                        billingMessage = "No signature found. Sign on plain white paper with a dark pen and try again.",
+                        signatureImportError = "No signature found in that picture. Sign on plain white paper " +
+                            "with a dark pen, photograph it close up in good light, and try again.",
                     )
                 }
                 SignatureStore.ImportResult.Unreadable -> _state.update {
-                    it.copy(signatureBusy = false, billingMessage = "Couldn't read that picture")
+                    it.copy(signatureBusy = false, signatureImportError = "Couldn't read that picture. Try another one.")
                 }
             }
         }
@@ -942,7 +992,11 @@ class ReaderViewModel @Inject constructor(
         _state.update {
             it.copy(savedSignatures = names, activeSignature = it.activeSignature?.takeIf { a -> a != name } ?: names.firstOrNull())
         }
-        viewModelScope.launch { runCatching { settings.setSignature(SignatureStore.encodeList(names)) } }
+        viewModelScope.launch {
+            runCatching { settings.setSignature(SignatureStore.encodeList(names)) }
+            // The image is deleted too unless a document you signed still uses it.
+            sweepSignatures(names.toSet(), immediately = true)
+        }
     }
 
     /**
@@ -962,6 +1016,34 @@ class ReaderViewModel @Inject constructor(
                 publishHistory()
             }
         }
+    }
+
+    fun clearSignatureImportError() = _state.update { it.copy(signatureImportError = null) }
+
+    /** Places the active signature in the middle of the page on screen (no precise tap needed). */
+    fun placeSignatureOnCurrentPage() {
+        val page = _state.value.currentPage
+        placeSignature(page, NormPoint(0.5f, 0.5f), aspectRatio(page))
+    }
+
+    /** Moves, resizes or turns the selected signature by one step (buttons and TalkBack actions). */
+    fun nudgeSelectedSignature(nudge: SignatureGestures.Nudge) {
+        val (ann, placement) = selectedSignature() ?: return
+        updateSignature(ann, SignatureGestures.nudge(placement, nudge, aspectRatio(ann.pageIndex)))
+    }
+
+    /** Removes the selected signature from the page (Undo brings it back). */
+    fun removeSelectedSignature() {
+        val (ann, _) = selectedSignature() ?: return
+        _state.update { it.copy(selectedSignatureId = null, billingMessage = "Signature removed. Tap Undo to bring it back.") }
+        deleteAnnotation(ann.id)
+    }
+
+    private fun selectedSignature(): Pair<Annotation, SignaturePlacement>? {
+        val id = _state.value.selectedSignatureId ?: return null
+        val ann = _state.value.annotationsByPage.values.firstNotNullOfOrNull { list -> list.firstOrNull { it.id == id } }
+            ?: return null
+        return SignaturePlacement.of(ann)?.let { ann to it }
     }
 
     /** Commits a move / resize / turn of a placed signature (one undo step). */
@@ -1008,6 +1090,7 @@ class ReaderViewModel @Inject constructor(
         source?.close()
         source = null
         pageTextCache = null
+        ocrTextCache = null
         discardUnlockedCopy()
         _state.update { it.copy(reflow = false, reflowPages = emptyList(), searchResults = emptyList()) }
     }

@@ -23,6 +23,9 @@ class DefaultAnnotationRepository @Inject constructor(
 
     override suspend fun clearPage(documentId: Long, pageIndex: Int) =
         dao.clearPage(documentId, pageIndex)
+
+    override suspend fun signatureImagesInUse(): Set<String> =
+        dao.signatureNotes().map { it.substringBeforeLast('@') }.filter { it.isNotBlank() }.toSet()
 }
 
 private fun AnnotationEntity.toDomain() = Annotation(

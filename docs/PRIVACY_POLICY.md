@@ -23,13 +23,18 @@ does not do with your information. **Sheaf is built to keep your documents on yo
   into your PDF as a searchable layer and is not sent to us.
 - **Signatures:** Signatures you draw or photograph are saved as images in the app's private storage
   on your device, excluded from cloud backup and device transfer. They are placed into a document only
-  where you put them, and leave your device only inside documents you choose to share or save.
-- **Photos and pictures:** Only pictures you select in Android's photo picker (or share to Sheaf) are
-  read, to turn them into PDFs or signatures. Sheaf has no access to the rest of your photos.
+  where you put them, and leave your device only inside documents you choose to share or save. When you
+  remove a saved signature, its image is deleted from your phone unless a document you signed still uses it.
+- **Photos and pictures:** Only pictures you choose (in Android's photo picker, the file picker or the
+  scanner's gallery import) or share to Sheaf are read, to turn them into PDFs or signatures. Sheaf has no
+  access to the rest of your photos.
+- **ID card and passport copies:** The pictures of your ID are processed on your device into one PDF in
+  Sheaf's private storage. Nothing is uploaded; you decide whether to share or save the copy.
 - **Saving and exporting:** Copies, JPG, Word, Excel and text exports are written only where you choose
   (Android's "Save" screen) or, for page pictures, to the Pictures/Sheaf album on your device.
 - **Translate:** Tapping Translate hands the selected text to the Google Translate app on your device.
-  Nothing is sent unless you tap it; Google Translate's own privacy policy then applies.
+  Nothing is sent unless you tap it. Google Translate may send that text to Google's servers to translate
+  it, under Google's own privacy policy.
 - **Purchases (Sheaf Pro):** In-app purchases are handled by **Google Play Billing**. Google processes the
   transaction; Sheaf only stores a local flag indicating whether Pro is unlocked. We do not receive or
   store your payment details.
@@ -51,7 +56,8 @@ https://developers.google.com/ml-kit/android-data-disclosure
 ## Diagnostic log
 To help fix problems, Sheaf keeps a small log of errors and crashes **on your device** (technical
 details only: app and Android version, device model, and error messages; never your documents, their
-names or passwords). It is never sent automatically. It leaves your device only if you tap
+names or passwords. File paths and document addresses are removed from error messages before they are
+written). It is never sent automatically. It leaves your device only if you tap
 **Settings → Share diagnostic log** and choose where to send it. You can clear it at any time in Settings.
 
 ## Third-party services

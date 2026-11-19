@@ -78,7 +78,7 @@ class MlKitPdfOcr @Inject constructor(
                     val renderer = PDFRenderer(doc)
                     (0 until doc.numberOfPages).map { i ->
                         ensureActive()
-                        val bitmap = renderer.renderImage(i, RENDER_SCALE)
+                        val bitmap = renderer.renderImage(i, scaleFor(doc, i))
                         try {
                             val result = Tasks.await(recognizer.process(InputImage.fromBitmap(bitmap, 0)))
                             // Blocks top to bottom, lines in reading order: plain text a person can edit.
@@ -106,7 +106,7 @@ class MlKitPdfOcr @Inject constructor(
         recognizer: com.google.mlkit.vision.text.TextRecognizer,
     ) {
         val page = doc.getPage(index)
-        val bitmap = renderer.renderImage(index, RENDER_SCALE) ?: return
+        val bitmap = renderer.renderImage(index, scaleFor(doc, index)) ?: return
         val bw = bitmap.width
         val bh = bitmap.height
         if (bw <= 0 || bh <= 0) return
@@ -145,6 +145,16 @@ class MlKitPdfOcr @Inject constructor(
         cs.close()
     }
 
+    /**
+     * 2x for normal pages (sharp enough for OCR), less for large-format sheets so the render never
+     * passes [MAX_RENDER_SIDE] pixels: an A0 drawing at 2x would need ~130 MB and fail.
+     */
+    private fun scaleFor(doc: PDDocument, index: Int): Float {
+        val box = doc.getPage(index).cropBox
+        val longest = maxOf(box.width, box.height).coerceAtLeast(1f)
+        return minOf(RENDER_SCALE, MAX_RENDER_SIDE / longest)
+    }
+
     /** Keep only characters the standard Helvetica (WinAnsi) encoding can render. */
     private fun sanitize(text: String): String =
         buildString { for (ch in text) append(if (ch.code in 0x20..0x7E) ch else ' ') }.trim()
@@ -155,6 +165,7 @@ class MlKitPdfOcr @Inject constructor(
 
     private companion object {
         const val RENDER_SCALE = 2f
+        const val MAX_RENDER_SIDE = 3000f
         val initialized = AtomicBoolean(false)
     }
 }

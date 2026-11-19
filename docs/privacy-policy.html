@@ -28,13 +28,18 @@ in Google's own UI and processes images on-device. Sheaf does not require the ca
 layer in your PDF and is not sent to us.</li>
 <li><strong>Signatures:</strong> signatures you draw or photograph are saved as images in the app's private
 storage on your device, excluded from cloud backup and device transfer, and leave your device only inside
-documents you choose to share or save.</li>
-<li><strong>Photos and pictures:</strong> only pictures you select in Android's photo picker (or share to Sheaf)
-are read, to turn them into PDFs or signatures. Sheaf has no access to the rest of your photos.</li>
+documents you choose to share or save. Removing a saved signature deletes its image unless a document you
+signed still uses it.</li>
+<li><strong>Photos and pictures:</strong> only pictures you choose (photo picker, file picker or the scanner's
+gallery import) or share to Sheaf are read, to turn them into PDFs or signatures. Sheaf has no access to the
+rest of your photos.</li>
+<li><strong>ID card and passport copies:</strong> processed on your device into one PDF in Sheaf's private
+storage; nothing is uploaded, and you decide whether to share or save it.</li>
 <li><strong>Saving and exporting:</strong> copies and JPG, Word, Excel and text exports are written only where
 you choose, or for page pictures to the Pictures/Sheaf album on your device.</li>
 <li><strong>Translate:</strong> tapping Translate hands the text to the Google Translate app on your device;
-nothing is sent unless you tap it.</li>
+nothing is sent unless you tap it. Google Translate may send that text to Google's servers to translate it,
+under Google's own privacy policy.</li>
 <li><strong>Purchases (Sheaf Pro):</strong> handled by Google Play Billing. Sheaf stores only a local
 "Pro unlocked" flag and never receives your payment details.</li>
 <li><strong>Network:</strong> used only for Google Play (purchases) and Google Play services components.
@@ -50,7 +55,7 @@ Google uses this to diagnose and improve ML Kit, encrypts it in transit (HTTPS),
 third parties. It never includes your documents, images, or recognized text.
 <a href="https://developers.google.com/ml-kit/android-data-disclosure">ML Kit data disclosure</a>.</p>
 <h2>Diagnostic log</h2>
-<p>To help fix problems, Sheaf keeps a small log of errors and crashes <strong>on your device</strong> (technical details only: app and Android version, device model, and error messages; never your documents, their names or passwords). It is never sent automatically. It leaves your device only if you tap <strong>Settings &rarr; Share diagnostic log</strong> and choose where to send it. You can clear it at any time in Settings.</p>
+<p>To help fix problems, Sheaf keeps a small log of errors and crashes <strong>on your device</strong> (technical details only: app and Android version, device model, and error messages; never your documents, their names or passwords; file paths and document addresses are removed from error messages before they are written). It is never sent automatically. It leaves your device only if you tap <strong>Settings &rarr; Share diagnostic log</strong> and choose where to send it. You can clear it at any time in Settings.</p>
 <h2>Third-party services</h2>
 <p>Google Play services / ML Kit (scanning, on-device OCR) and Google Play Billing (purchases), each
 governed by Google's Privacy Policy.</p>

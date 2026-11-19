@@ -72,8 +72,19 @@ class ReaderEndToEndTest {
         }
     }
 
-    private fun waitForDescription(description: String) =
-        compose.waitUntilAtLeastOneExists(hasContentDescription(description), timeout)
+    private fun waitForDescription(description: String) {
+        try {
+            compose.waitUntilAtLeastOneExists(hasContentDescription(description), timeout)
+        } catch (e: androidx.compose.ui.test.ComposeTimeoutException) {
+            throw AssertionError(
+                "Timed out waiting for description '$description'. Screen: " +
+                    runCatching { compose.onRoot(useUnmergedTree = true).printToString(maxDepth = 30) }
+                        .getOrElse { "<no compose root: ${it.message}>" }
+                        .replace("\n", " | "),
+                e,
+            )
+        }
+    }
 
     private fun waitForText(text: String, substring: Boolean = false) {
         try {
@@ -221,7 +232,7 @@ class ReaderEndToEndTest {
                 waitForText("Your signature")
             }
             compose.onNodeWithText("Draw").performClick()
-            val pad = "Signature pad. Draw your signature with your finger."
+            val pad = "Signature pad. Draw your signature with your finger, or use the Photo tab instead."
             waitForDescription(pad)
             compose.onNodeWithText("Save signature").assertIsNotEnabled()
             // Two separate strokes: both must survive (the old pad kept only the last one).
@@ -235,7 +246,7 @@ class ReaderEndToEndTest {
             compose.onNodeWithText("Save signature").performClick()
 
             // Signing mode: tap the page to place it, then drag it somewhere else.
-            waitForText("Tap the page to place your signature", substring = true)
+            waitForText("Tap the page where the signature goes", substring = true)
             compose.onNodeWithContentDescription("Page 1 of 1").performTouchInput { click(center) }
             compose.waitUntil(timeout) {
                 runCatching { compose.onNodeWithContentDescription("Undo").assertIsEnabled() }.isSuccess
@@ -243,6 +254,12 @@ class ReaderEndToEndTest {
             compose.onNodeWithContentDescription("Page 1 of 1").performTouchInput {
                 swipe(center, Offset(width * 0.3f, height * 0.8f), 400)
             }
+            // The same adjustments without dragging (TalkBack / Switch Access path): select, then buttons.
+            compose.onNodeWithContentDescription("Page 1 of 1").performTouchInput { click(Offset(width * 0.3f, height * 0.8f)) }
+            waitForDescription("Move signature left")
+            compose.onNodeWithContentDescription("Move signature left").performClick()
+            compose.onNodeWithContentDescription("Make signature bigger").performClick()
+            compose.onNodeWithContentDescription("Turn signature right").performClick()
             compose.onNodeWithText("Done").performClick()
 
             // The signature is a real annotation on the page.

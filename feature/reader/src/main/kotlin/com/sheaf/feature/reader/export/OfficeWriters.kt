@@ -80,11 +80,22 @@ object OfficeWriters {
     private fun row(r: Int, cells: List<String>): String = buildString {
         append("<row r=\"").append(r).append("\">")
         cells.forEachIndexed { c, v ->
-            append("<c r=\"").append(columnName(c)).append(r).append("\" t=\"inlineStr\"><is><t xml:space=\"preserve\">")
-            append(xml(v)).append("</t></is></c>")
+            val ref = columnName(c) + r
+            if (c == 0 && v.isNotEmpty() && v.all { it.isDigit() }) {
+                // The page number is a real number, so it sorts and filters as one.
+                append("<c r=\"").append(ref).append("\"><v>").append(v).append("</v></c>")
+            } else {
+                append("<c r=\"").append(ref).append("\" t=\"inlineStr\"><is><t xml:space=\"preserve\">")
+                append(xml(cellText(v))).append("</t></is></c>")
+            }
         }
         append("</row>")
     }
+
+    /** Excel refuses (and "repairs") cells over 32,767 characters. */
+    const val MAX_CELL_CHARS = 32_767
+
+    fun cellText(v: String): String = if (v.length <= MAX_CELL_CHARS) v else v.take(MAX_CELL_CHARS - 1) + "…"
 
     private fun coreProps(title: String) = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>${xml(title)}</dc:title><dc:creator>Sheaf</dc:creator></cp:coreProperties>"""

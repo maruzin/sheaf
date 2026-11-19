@@ -57,14 +57,22 @@ object SignatureGestures {
         pageW: Float,
         pageH: Float,
         handleRadius: Float,
+        minTouchRadius: Float = 0f,
     ): Hit? {
+        // Resize and turn respond across the full touch target; delete (one tap, destructive) only
+        // close to its disc, so grabbing a corner to move never removes the signature by accident.
+        val reach = maxOf(handleRadius * 1.4f, minTouchRadius)
+        val deleteReach = handleRadius * 1.4f
         placements.firstOrNull { it.first == selectedId }?.let { (id, p) ->
             val f = frame(p, pageW, pageH)
             val (lx, ly) = f.toLocal(x, y)
-            fun near(hx: Float, hy: Float) = hypot(lx - hx, ly - hy) <= handleRadius * 1.4f
-            if (near(-f.hw, -f.hh)) return Hit(id, Part.Delete)
-            if (near(f.hw, f.hh)) return Hit(id, Part.Resize)
-            if (near(0f, -f.hh - rotateKnobOffset(handleRadius))) return Hit(id, Part.Rotate)
+            // On a small signature the handles' zones overlap: the nearest handle wins.
+            val candidates = listOf(
+                Triple(Part.Delete, hypot(lx + f.hw, ly + f.hh), deleteReach),
+                Triple(Part.Resize, hypot(lx - f.hw, ly - f.hh), reach),
+                Triple(Part.Rotate, hypot(lx, ly + f.hh + rotateKnobOffset(handleRadius)), reach),
+            )
+            candidates.filter { (_, d, r) -> d <= r }.minByOrNull { it.second }?.let { return Hit(id, it.first) }
         }
         for ((id, p) in placements.asReversed()) {
             val f = frame(p, pageW, pageH)
@@ -102,5 +110,27 @@ object SignatureGestures {
         val diff = kotlin.math.abs(deg - nearest).let { if (it > 180f) 360f - it else it }
         if (diff <= 4f) deg = nearest
         return start.copy(rotation = deg)
+    }
+
+    /** Button and accessibility adjustments: the same result as a drag, without needing one. */
+    enum class Nudge { Left, Right, Up, Down, Bigger, Smaller, TurnLeft, TurnRight }
+
+    /** [p] adjusted by one [nudge] step on a page of [pageAspect] = height / width; stays on the page. */
+    fun nudge(p: SignaturePlacement, nudge: Nudge, pageAspect: Float): SignaturePlacement {
+        val step = 0.02f
+        val out = when (nudge) {
+            Nudge.Left -> p.copy(cx = p.cx - step)
+            Nudge.Right -> p.copy(cx = p.cx + step)
+            Nudge.Up -> p.copy(cy = p.cy - step)
+            Nudge.Down -> p.copy(cy = p.cy + step)
+            Nudge.Bigger, Nudge.Smaller -> {
+                val f = if (nudge == Nudge.Bigger) 1.1f else 1f / 1.1f
+                val w = (p.w * f).coerceIn(SignaturePlacement.MIN_WIDTH, SignaturePlacement.MAX_WIDTH)
+                p.copy(w = w, h = p.h * (w / p.w))
+            }
+            Nudge.TurnLeft -> p.copy(rotation = ((p.rotation - 15f) % 360f + 360f) % 360f)
+            Nudge.TurnRight -> p.copy(rotation = (p.rotation + 15f) % 360f)
+        }
+        return out.clampedToPage(pageAspect)
     }
 }

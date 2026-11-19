@@ -2,10 +2,7 @@ package com.sheaf.feature.reader.export
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.ImageDecoder
 import android.net.Uri
-import android.os.Build
 import com.sheaf.core.data.log.AppLog
 import com.sheaf.feature.reader.pdf.PdfBoxMemory
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
@@ -25,7 +22,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.roundToInt
 
 /** ID document sizes for true-to-size copies (ISO/IEC 7810). */
 enum class IdKind(val label: String, val widthMm: Float, val heightMm: Float) {
@@ -110,6 +106,21 @@ class ImagePdfBuilder @Inject constructor(
             out.takeIf { it.length() > 0 }
         }.onFailure { AppLog.e("ImagePdf", "Building the ID copy failed", it) }.getOrNull()
             ?: run { out.delete(); null }
+    }.also { deleteScannerImages(listOfNotNull(front, back)) }
+
+    /**
+     * The scanner leaves its photos of the ID in Sheaf's cache. They're copies of a passport or ID
+     * card, so delete them once the PDF is built. Only files inside Sheaf's own cache are touched;
+     * pictures picked from the gallery are never deleted.
+     */
+    private fun deleteScannerImages(images: List<Uri>) {
+        val cache = runCatching { context.cacheDir.canonicalFile }.getOrNull() ?: return
+        images.filter { it.scheme == "file" }.forEach { uri ->
+            runCatching {
+                val f = File(uri.path ?: return@runCatching).canonicalFile
+                if (f.path.startsWith(cache.path + File.separator)) f.delete()
+            }
+        }
     }
 
     /** Diagonal, semi-transparent text repeated across [area]. */
@@ -141,31 +152,7 @@ class ImagePdfBuilder @Inject constructor(
         cs.restoreGraphicsState()
     }
 
-    private fun decode(uri: Uri, maxSide: Int): Bitmap? =
-        runCatching { decodeWith(uri, maxSide, preferImageDecoder = true) }.getOrNull()
-            // Some sources ImageDecoder can't open (and test environments) still decode the classic way.
-            ?: decodeWith(uri, maxSide, preferImageDecoder = false)
-
-    private fun decodeWith(uri: Uri, maxSide: Int, preferImageDecoder: Boolean): Bitmap? = runCatching {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && preferImageDecoder) {
-            ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, uri)) { d, info, _ ->
-                d.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-                val longest = max(info.size.width, info.size.height)
-                if (longest > maxSide) {
-                    val s = maxSide.toFloat() / longest
-                    d.setTargetSize((info.size.width * s).roundToInt(), (info.size.height * s).roundToInt())
-                }
-            }
-        } else {
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-            var sample = 1
-            while (max(bounds.outWidth, bounds.outHeight) / sample > maxSide) sample *= 2
-            context.contentResolver.openInputStream(uri)?.use {
-                BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
-            }
-        }
-    }.onFailure { AppLog.e("ImagePdf", "Reading a picture failed", it) }.getOrNull()
+    private fun decode(uri: Uri, maxSide: Int): Bitmap? = PictureDecoder.decode(context, uri, maxSide)
 
     private fun ensureInit() {
         if (initialized.compareAndSet(false, true)) PDFBoxResourceLoader.init(context.applicationContext)

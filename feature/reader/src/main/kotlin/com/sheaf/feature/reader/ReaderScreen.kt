@@ -65,6 +65,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import com.sheaf.feature.reader.export.DocumentExporter
 import com.sheaf.feature.reader.export.ExportDialog
 import com.sheaf.feature.reader.export.ExportReadyDialog
 import com.sheaf.feature.reader.export.TextViewDialog
@@ -87,6 +88,8 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -251,11 +254,14 @@ fun ReaderScreen(
     LaunchedEffect(state.uri) { if (state.uri.isNotBlank()) zoom = state.zoom }
     var menuOpen by remember { mutableStateOf(false) }
     var showProtect by remember { mutableStateOf(false) }
-    var showSignatureDialog by remember { mutableStateOf(false) }
+    // Saveable: the dialog (and its camera / gallery launchers) must survive a rotation mid-capture.
+    var showSignatureDialog by rememberSaveable { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf(false) }
     // The picker result arrives after the state was consumed: hold the request here meanwhile.
-    var saveRequest by remember { mutableStateOf<PendingSave?>(null) }
-    var exportToSave by remember { mutableStateOf<ExportReady?>(null) }
+    // Saveable, so rotating the phone (or the system killing Sheaf) inside the picker doesn't lose
+    // it: the picker has already created the target file, and it must still be filled.
+    var saveRequest by rememberSaveable(stateSaver = PendingSaveSaver) { mutableStateOf<PendingSave?>(null) }
+    var exportToSave by rememberSaveable(stateSaver = ExportReadySaver) { mutableStateOf<ExportReady?>(null) }
     val saveLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/pdf"),
     ) { target ->
@@ -263,7 +269,7 @@ fun ReaderScreen(
         saveRequest = null
     }
     // One "Save as" launcher per export type, so the picker knows the file type and keeps the extension.
-    var exportFileToSave by remember { mutableStateOf<File?>(null) }
+    var exportFileToSave by rememberSaveable(stateSaver = FileSaver) { mutableStateOf<File?>(null) }
     val saveAsLaunchers = com.sheaf.feature.reader.export.ExportFormat.entries.associateWith { format ->
         rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(format.mime)) { target ->
             exportFileToSave?.let { viewModel.completeExportSaveAs(it, target) }
@@ -521,6 +527,10 @@ fun ReaderScreen(
                         onChoose = { viewModel.onEvent(ReaderEvent.ChooseSignature(it)) },
                         onNew = { showSignatureDialog = true },
                         onDone = { viewModel.onEvent(ReaderEvent.ToggleAnnotate) },
+                        hasSelection = state.selectedSignatureId != null,
+                        onPlaceHere = viewModel::placeSignatureOnCurrentPage,
+                        onNudge = viewModel::nudgeSelectedSignature,
+                        onRemove = viewModel::removeSelectedSignature,
                     )
                 } else if (state.annotating) {
                     InkToolbar(
@@ -623,8 +633,8 @@ fun ReaderScreen(
                     onUpdateSignature = { ann, placement -> viewModel.updateSignature(ann, placement) },
                     onSelectSignature = { viewModel.onEvent(ReaderEvent.SelectSignature(it)) },
                     onDeleteSignature = { id ->
-                        viewModel.onEvent(ReaderEvent.SelectSignature(null))
-                        viewModel.deleteAnnotation(id)
+                        viewModel.onEvent(ReaderEvent.SelectSignature(id))
+                        viewModel.removeSelectedSignature()
                     },
                     formMode = state.formMode,
                     formFieldsByPage = formByPage,
@@ -745,7 +755,12 @@ fun ReaderScreen(
         SignatureDialog(
             saved = state.savedSignatures,
             images = state.signatureImages,
-            onDismiss = { showSignatureDialog = false },
+            busy = state.signatureBusy,
+            importError = state.signatureImportError,
+            onDismiss = {
+                showSignatureDialog = false
+                viewModel.clearSignatureImportError()
+            },
             onSaveDrawn = { strokes, w, h, lw, colour -> viewModel.saveDrawnSignature(strokes, w, h, lw, colour) },
             onImport = { viewModel.importSignature(it) },
             onChoose = { viewModel.onEvent(ReaderEvent.ChooseSignature(it)) },
@@ -1092,6 +1107,25 @@ private fun SearchBar(
     }
 }
 
+/** Saved-state forms of the requests that wait on a system picker (plain strings survive process death). */
+private val PendingSaveSaver = Saver<PendingSave?, List<String>>(
+    save = { it?.let { p -> listOf(p.source, p.suggestedName, p.mime, p.temp.toString()) } ?: emptyList() },
+    restore = { l -> if (l.size == 4) PendingSave(l[0], l[1], l[2], l[3].toBoolean()) else null },
+)
+
+private val FileSaver = Saver<File?, String>(
+    save = { it?.absolutePath ?: "" },
+    restore = { p -> p.takeIf { it.isNotEmpty() }?.let(::File) },
+)
+
+private val ExportReadySaver = Saver<ExportReady?, List<String>>(
+    save = { it?.let { e -> listOf(e.format.name) + e.files.map { f -> f.absolutePath } } ?: emptyList() },
+    restore = { l ->
+        val format = l.firstOrNull()?.let { n -> com.sheaf.feature.reader.export.ExportFormat.entries.firstOrNull { it.name == n } }
+        if (format == null || l.size < 2) null else ExportReady(l.drop(1).map(::File), format)
+    },
+)
+
 private suspend fun shareDocument(context: android.content.Context, uri: String, displayName: String) {
     // Every share goes out through Sheaf's own FileProvider:
     // - file:// documents (scans, "Open with" copies, OCR output, edited copies) would throw
@@ -1104,7 +1138,7 @@ private suspend fun shareDocument(context: android.content.Context, uri: String,
         runCatching {
             val safe = displayName.replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { "Document.pdf" }
                 .let { if (it.endsWith(".pdf", ignoreCase = true)) it else "$it.pdf" }
-            val dir = File(context.cacheDir, "share").apply { mkdirs() }
+            val dir = DocumentExporter.newShareFolder(File(context.cacheDir, "share"))
             val out = File(dir, safe)
             val input = if (parsed.scheme == "file") {
                 parsed.path?.let { File(it).inputStream() }
@@ -1317,12 +1351,21 @@ private fun PdfPageItem(
         savedStrokes.mapNotNull { a -> SignaturePlacement.of(a)?.let { a to it } }
     }
     var liveSignature by remember(pageIndex) { mutableStateOf<LiveSignature?>(null) }
-    // The database caught up with a drag: show the saved placement again.
-    LaunchedEffect(savedStrokes) { liveSignature = null }
-    val currentPlaced by rememberUpdatedState(placed)
+    // Keep showing (and hit-testing) a dragged signature where the finger left it until the database
+    // holds that same placement. Clearing it on any database update made the next tap or drag use the
+    // old position: a quick tap after a drag missed and deselected the signature.
+    LaunchedEffect(placed) {
+        val l = liveSignature ?: return@LaunchedEffect
+        val saved = placed.firstOrNull { it.first.id == l.id }?.second
+        if (saved == null || saved == l.placement) liveSignature = null
+    }
+    val shownPlaced = remember(placed, liveSignature) {
+        val l = liveSignature
+        if (l == null) placed else placed.map { if (it.first.id == l.id) it.first to l.placement else it }
+    }
+    val currentPlaced by rememberUpdatedState(shownPlaced)
     val currentSelected by rememberUpdatedState(selectedSignatureId)
     val handleRadius = with(LocalDensity.current) { 13.dp.toPx() }
-    val accent = MaterialTheme.colorScheme.primary
     val pageLabel = "Page ${pageIndex + 1} of $pageCount"
 
     Box(
@@ -1396,7 +1439,7 @@ private fun PdfPageItem(
                 if (ann.type == AnnotationType.Signature || ann.type == AnnotationType.Note) return@forEach
                 val base = Color(ann.colorArgb)
                 val c = if (ann.type == AnnotationType.Highlight) base.copy(alpha = 0.30f) else base
-                drawInk(ann.points, c, ann.strokeWidth)
+                drawInk(ann.points, c, ann.strokeWidth, pageFilter)
             }
             drawSignatures(
                 placed = placed,
@@ -1404,7 +1447,7 @@ private fun PdfPageItem(
                 selectedId = if (annotating && signatureMode) selectedSignatureId else null,
                 live = liveSignature,
                 handleRadius = handleRadius,
-                accent = accent,
+                pageFilter = pageFilter,
             )
             if (live.size >= 2) {
                 val path = Path().apply {
@@ -1515,14 +1558,22 @@ private fun shareFilledPdf(context: android.content.Context, path: String, displ
         val original = File(path)
         val base = displayName.substringBeforeLast(".").ifBlank { "Document" }
             .replace(Regex("[\\\\/:*?\"<>|]"), "_")
-        val named = File(original.parentFile, "$base ($suffix).pdf")
+        // Its own subfolder: a unique share URI, and no clash with an earlier share of the same name.
+        val folder = DocumentExporter.newShareFolder(original.parentFile ?: return@runCatching)
+        val named = File(folder, "$base ($suffix).pdf")
         val file = if (original.renameTo(named)) named else original
         val uri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)
         startShare(context, uri, file.name, "Share PDF")
     }
 }
 
-private fun DrawScope.drawInk(points: List<NormPoint>, color: Color, widthFrac: Float) {
+private fun DrawScope.drawInk(
+    points: List<NormPoint>,
+    color: Color,
+    widthFrac: Float,
+    // The page's reading-theme filter, so black ink stays visible on a darkened page.
+    pageFilter: androidx.compose.ui.graphics.ColorFilter? = null,
+) {
     if (points.size < 2) return
     val path = Path()
     path.moveTo(points[0].x * size.width, points[0].y * size.height)
@@ -1531,6 +1582,7 @@ private fun DrawScope.drawInk(points: List<NormPoint>, color: Color, widthFrac: 
         path = path,
         color = color,
         style = Stroke(width = (widthFrac * size.width).coerceAtLeast(2f), cap = StrokeCap.Round),
+        colorFilter = pageFilter,
     )
 }
 

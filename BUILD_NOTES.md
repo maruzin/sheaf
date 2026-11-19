@@ -4,6 +4,47 @@ Running engineering log. Newest first. Every non-obvious decision gets one line 
 
 ---
 
+## 1.2.0 (versionCode 10), 2026-11-19: review pass (code, security, accessibility)
+Four independent reviews of the vc9 change set (code correctness, security, accessibility, competitor scan)
+before upload. Every confirmed finding fixed; vc9 was never uploaded.
+- **Rotation / process death:** the pending "Save to phone" / "Save as" request and the signature dialog
+  (with its camera launchers) are now `rememberSaveable`. Before, rotating inside the system picker lost
+  the request and left a 0-byte file in Downloads. A failed write now deletes the file the picker created.
+- **Turned signatures:** page clamping uses the turned box's bounding box, so a 90-degree signature can
+  reach the side edge and is never cut off in the exported PDF.
+- **Photos on Android 8:** one `PictureDecoder` for signatures, Photos to PDF and ID copies; its
+  BitmapFactory fallback applies EXIF orientation (was sideways below API 28). Import capped at 1200 px,
+  ink extraction works in one buffer, out-of-memory is caught (was a crash on low-RAM phones).
+- **Wide drawn signatures:** scaled down whole at the 4000 px cap instead of cropped on the right.
+- **Text view:** one editable field per page in a LazyColumn (one 300k-character field froze the phone);
+  clipboard and share capped at 100k characters, Translate at 5k, each with a notice; clipboard marked
+  sensitive. OCR renders capped at 3000 px (A0 drawings failed), results cached, cancelled on close.
+- **Excel:** cells capped at 32,767 characters (Excel "repairs" longer ones); page numbers are numbers.
+- **Share files:** every share and export goes in its own random subfolder of cache/share, so names never
+  collide and an app that received one share can't read a later file through its old URI grant.
+- **Protected PDFs:** JPG export works (rendered from the unlocked copy; it always failed before), and
+  exports that can't carry the password (JPG, TXT, Word, Excel) say so.
+- **Privacy:** removed signatures are deleted from the phone (sweep of images neither saved nor placed on
+  any document; new `AnnotationDao.signatureNotes`); scanner photos of IDs are deleted after the copy is
+  built; the diagnostic log strips file paths and content URIs (the policy promised no document names,
+  and exception messages carried them). Privacy policy updated to match.
+- **Accessibility:** every signature drag has a button (move, resize, turn, remove, "Place on this page")
+  for TalkBack, Switch Access and anyone who finds small drags hard; hint text is a live region.
+  Signatures and ink take the reading theme's filter (black ink vanished on the dark theme). Handles use a
+  fixed high-contrast blue with a white rim, sizes in dp, 48dp touch reach; delete only responds close to
+  its disc and the nearest handle wins on small signatures; removal says "Tap Undo to bring it back".
+  48dp ink swatches as a radio group; signature, export and ID dialogs scroll at 200% font; photo import
+  errors stay in the dialog with a retry; removing a saved signature asks first; pad contrast raised.
+- **Stale selection:** undo that removed the selected signature (or a selection on another page) no
+  longer swallows the next tap.
+- **Tap right after a drag:** a dragged signature stays shown and hit-tested where it was left until the
+  database holds the same placement (found by the device test: a quick tap hit the old position and
+  deselected; a quick second drag started from the stale spot).
+- Empty library text said "Open PDF"; the button is "Open file".
+- Tests: 103 unit (9 new: rotated clamp, stroke cap, cell cap, nudges, handle hit-testing, log scrub, sweep);
+  9/9 device tests on the Android 15 emulator, three runs in a row (signing test now also uses the buttons);
+  strict lint clean; hands-on check in dark mode (signature visible, buttons move/resize/turn).
+
 ## 1.2.0 (versionCode 9), 2026-11-19: signing rebuilt, exports, ID copies, text tools
 - **Signature pad bug (shipped in vc8):** the pad cleared on every new stroke, so only the last stroke
   of a signature survived. New pad keeps every stroke (dots included), with Undo, Clear and black/blue ink.

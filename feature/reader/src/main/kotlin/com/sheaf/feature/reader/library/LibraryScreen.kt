@@ -83,6 +83,10 @@ import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import com.sheaf.core.domain.model.Document
 import java.io.File
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.selection.selectableGroup
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -387,7 +391,7 @@ private fun EmptyState() {
         Icon(Icons.Filled.Description, contentDescription = null)
         Text("No documents yet", style = MaterialTheme.typography.bodyMedium)
         Text(
-            "Tap \"Open PDF\" to add one.",
+            "Tap \"Open file\" to add a PDF or a photo.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -510,18 +514,22 @@ private fun IdCopyDialog(sides: Int, onDismiss: () -> Unit, onCreate: (IdKind, S
         onDismissRequest = onDismiss,
         title = { Text("ID copy") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Scrolls at large font sizes and with the keyboard open.
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(if (sides >= 2) "Front and back go on one A4 page, at real size." else "The scan goes on an A4 page, at real size.")
+                Column(Modifier.selectableGroup()) {
                 IdKind.entries.forEach { k ->
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .fillMaxWidth()
+                            .heightIn(min = 48.dp)
                             .selectable(selected = k == kind, role = Role.RadioButton) { kind = k },
                     ) {
                         RadioButton(selected = k == kind, onClick = null)
                         Text(k.label, modifier = Modifier.padding(start = 8.dp))
                     }
+                }
                 }
                 OutlinedTextField(
                     value = watermark,
@@ -532,7 +540,7 @@ private fun IdCopyDialog(sides: Int, onDismiss: () -> Unit, onCreate: (IdKind, S
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Text(
-                    "A watermark says what the copy is for, so it can't be reused elsewhere.",
+                    "A watermark says what the copy is for, which makes it harder to misuse.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

@@ -35,11 +35,12 @@ class DocumentExporter @Inject constructor(
     private val io: CoroutineDispatcher,
     private val renderFactory: PdfRenderSourceFactory,
 ) {
-    private fun shareDir(): File = File(context.cacheDir, "share").apply { mkdirs() }
+    /** A fresh folder for one export, so its share URI is never reused (see [newShareFolder]). */
+    private fun shareDir(): File = newShareFolder(File(context.cacheDir, "share"))
 
     /** One JPG per page at about 200 dpi, named "<name> - page N.jpg". Empty list on failure. */
     suspend fun pagesToJpg(uri: String, baseName: String, password: String? = null): List<File> = withContext(io) {
-        val dir = File(shareDir(), "jpg_${System.currentTimeMillis()}").apply { mkdirs() }
+        val dir = shareDir()
         val files = ArrayList<File>()
         runCatching {
             val source = renderFactory.open(uri, password)
@@ -105,9 +106,13 @@ class DocumentExporter @Inject constructor(
         }.onFailure { AppLog.e("Export", "Copying the PDF for export failed", it) }.getOrNull()
     }
 
-    /** Copies [source] (a file path or content/file uri) into [target], a uri from the system "Save" picker. */
+    /**
+     * Copies [source] (a file path or content/file uri) into [target], a uri from the system "Save"
+     * picker. The picker creates the file before Sheaf writes it, so on failure the empty file is
+     * removed again rather than left in the user's folder.
+     */
     suspend fun writeTo(target: Uri, source: String): Boolean = withContext(io) {
-        runCatching {
+        val ok = runCatching {
             val input = if (source.startsWith("/")) File(source).inputStream()
             else context.contentResolver.openInputStream(source.toUri())
             val output = context.contentResolver.openOutputStream(target, "wt")
@@ -118,6 +123,13 @@ class DocumentExporter @Inject constructor(
             input.use { i -> output.use { o -> i.copyTo(o) } }
             true
         }.onFailure { AppLog.e("Export", "Saving to the chosen location failed", it) }.getOrDefault(false)
+        if (!ok) discard(target)
+        ok
+    }
+
+    /** Removes an empty file the "Save" picker created (pass null if the user cancelled). */
+    suspend fun discard(target: Uri?) = withContext(io) {
+        if (target != null) runCatching { DocumentsContract.deleteDocument(context.contentResolver, target) }
     }
 
     /** Writes every file into the folder [tree] the user picked. Returns how many were saved. */
@@ -170,6 +182,14 @@ class DocumentExporter @Inject constructor(
         private const val JPG_WIDTH = 1654
         private const val JPG_MAX_HEIGHT = 6000
         private const val JPG_QUALITY = 90
+
+        /**
+         * A new, uniquely named subfolder of [root]. The file inside keeps a readable name ("Lease
+         * (signed).pdf") but its FileProvider URI is unique, so an app that received an earlier share
+         * can never read a later file through its old URI grant, and two exports never overwrite each other.
+         */
+        fun newShareFolder(root: File): File =
+            File(root, java.util.UUID.randomUUID().toString().take(12)).apply { mkdirs() }
 
         /** File names other apps and file systems accept. */
         fun safeName(name: String): String =

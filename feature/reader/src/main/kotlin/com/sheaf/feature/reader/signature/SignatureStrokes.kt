@@ -14,6 +14,7 @@ object SignatureStrokes {
     data class Layout(val strokes: List<List<Pair<Float, Float>>>, val width: Int, val height: Int, val lineWidth: Float)
 
     const val OUTPUT_HEIGHT = 360
+    private const val MAX_WIDTH = 4000f
 
     /**
      * [strokes] are normalized over a pad [padW] x [padH] pixels wide, drawn with a line [lineWidthPx]
@@ -31,10 +32,12 @@ object SignatureStrokes {
         minX -= margin; maxX += margin; minY -= margin; maxY += margin
         val boxH = max(maxY - minY, lineWidthPx * 8f)
         val boxW = max(maxX - minX, lineWidthPx * 8f)
-        val scale = OUTPUT_HEIGHT / boxH
-        val outW = (boxW * scale).roundToInt().coerceIn(16, 4000)
+        // Fixed height, unless a very wide signature would pass the width cap: then scale it down whole.
+        val scale = minOf(OUTPUT_HEIGHT / boxH, MAX_WIDTH / boxW)
+        val outW = (boxW * scale).roundToInt().coerceIn(16, MAX_WIDTH.toInt())
+        val outH = (boxH * scale).roundToInt().coerceAtLeast(16)
         val out = px.map { s -> s.map { (x, y) -> (x - minX) * scale to (y - minY) * scale } }
-        return Layout(out, outW, OUTPUT_HEIGHT, (lineWidthPx * scale).coerceAtLeast(2f))
+        return Layout(out, outW, outH, (lineWidthPx * scale).coerceAtLeast(2f))
     }
 
     /** Legacy signatures (before 1.2) were one polyline saved as "x,y;x,y" over a 2.5:1 box. */

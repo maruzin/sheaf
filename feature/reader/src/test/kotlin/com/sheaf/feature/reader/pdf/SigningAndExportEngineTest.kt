@@ -175,4 +175,26 @@ class SigningAndExportEngineTest {
         val txt = exporter.textFile(ExportFormat.Txt, listOf("one", "two"), "Report")!!
         assertTrue(txt.readText().contains("--- Page 2 ---\ntwo"))
     }
+
+    @Test
+    fun `sweep deletes unused signature images but keeps saved, placed and brand-new ones`() = runTest {
+        val dir = File(context.noBackupFilesDir, "signatures").apply { mkdirs() }
+        val old = System.currentTimeMillis() - 60 * 60_000L
+        fun sig(name: String, modified: Long) = File(dir, name).apply { writeText("png"); setLastModified(modified) }
+        val kept = sig("sig_1_1.png", old)
+        val unused = sig("sig_2_2.png", old)
+        val fresh = sig("sig_3_3.png", System.currentTimeMillis())
+        val other = File(dir, "notes.txt").apply { writeText("x"); setLastModified(old) }
+
+        val deleted = store.sweep(keep = setOf("sig_1_1.png"))
+
+        assertEquals(1, deleted)
+        assertTrue(kept.exists())
+        assertTrue("unused image deleted", !unused.exists())
+        assertTrue("a signature saved moments ago is left alone", fresh.exists())
+        assertTrue("files Sheaf didn't name are never touched", other.exists())
+        // Removing a signature right now deletes it regardless of age.
+        store.sweep(keep = setOf("sig_1_1.png"), now = Long.MAX_VALUE)
+        assertTrue(!fresh.exists())
+    }
 }

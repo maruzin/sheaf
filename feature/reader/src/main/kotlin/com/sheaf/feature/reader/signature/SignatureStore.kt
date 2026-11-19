@@ -4,22 +4,20 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
-import android.graphics.ImageDecoder
 import android.graphics.Paint
 import android.graphics.Path
 import android.net.Uri
-import android.os.Build
 import android.util.LruCache
 import androidx.core.graphics.createBitmap
 import com.sheaf.core.data.log.AppLog
 import com.sheaf.core.domain.model.NormPoint
+import com.sheaf.feature.reader.export.PictureDecoder
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.math.max
 import kotlin.math.roundToInt
 
 /**
@@ -99,22 +97,45 @@ class SignatureStore @Inject constructor(
 
     /** Cuts the signature out of a photo or picture ([uri]) and saves it as a new signature image. */
     suspend fun import(uri: Uri): ImportResult = withContext(io) {
-        val bitmap = runCatching { decode(uri, MAX_IMPORT_SIDE) }
-            .onFailure { AppLog.e("Signature", "Reading the signature picture failed", it) }
-            .getOrNull() ?: return@withContext ImportResult.Unreadable
-        val pixels = IntArray(bitmap.width * bitmap.height)
-        bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-        val w = bitmap.width
-        val h = bitmap.height
-        bitmap.recycle()
-        when (val r = SignatureInk.extract(pixels, w, h)) {
-            SignatureInk.Result.NoInk -> ImportResult.NoInk
-            is SignatureInk.Result.Ok -> {
-                val out = Bitmap.createBitmap(r.image.pixels, r.image.width, r.image.height, Bitmap.Config.ARGB_8888)
-                val name = runCatching { writePng(out) }.getOrNull()
-                if (name != null) ImportResult.Ok(name) else ImportResult.Unreadable
+        try {
+            val bitmap = decode(uri, MAX_IMPORT_SIDE) ?: return@withContext ImportResult.Unreadable
+            val w = bitmap.width
+            val h = bitmap.height
+            val pixels = IntArray(w * h)
+            bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
+            bitmap.recycle()
+            when (val r = SignatureInk.extract(pixels, w, h)) {
+                SignatureInk.Result.NoInk -> ImportResult.NoInk
+                is SignatureInk.Result.Ok -> {
+                    val out = Bitmap.createBitmap(r.image.pixels, r.image.width, r.image.height, Bitmap.Config.ARGB_8888)
+                    ImportResult.Ok(writePng(out))
+                }
+            }
+        } catch (oom: OutOfMemoryError) {
+            // Low-memory phones: report it instead of crashing the app.
+            AppLog.e("Signature", "Signature picture too large to process", oom)
+            ImportResult.Unreadable
+        } catch (e: Exception) {
+            AppLog.e("Signature", "Importing the signature picture failed", e)
+            ImportResult.Unreadable
+        }
+    }
+
+    /**
+     * Deletes signature images nothing uses any more: not in the saved list and not placed on any
+     * document ([keep]). Removed signatures are personal data and shouldn't linger on the phone.
+     * Files younger than a few minutes are left alone, so a signature being saved right now is safe.
+     */
+    suspend fun sweep(keep: Set<String>, now: Long = System.currentTimeMillis()): Int = withContext(io) {
+        var deleted = 0
+        dir.listFiles()?.forEach { f ->
+            if (NAME.matches(f.name) && f.name !in keep && now - f.lastModified() > SWEEP_MIN_AGE_MS) {
+                cache.remove(f.name)
+                if (f.delete()) deleted++
             }
         }
+        if (deleted > 0) AppLog.i("Signature", "Deleted $deleted unused signature image(s)")
+        deleted
     }
 
     /** Converts a legacy single-stroke signature (drawn on a 2.5:1 pad) into an image. */
@@ -129,39 +150,13 @@ class SignatureStore @Inject constructor(
         return name
     }
 
-    private fun decode(uri: Uri, maxSide: Int): Bitmap? =
-        runCatching { decodeWith(uri, maxSide, preferImageDecoder = true) }.getOrNull()
-            // Some sources ImageDecoder can't open (and test environments) still decode the classic way.
-            ?: decodeWith(uri, maxSide, preferImageDecoder = false)
-
-    private fun decodeWith(uri: Uri, maxSide: Int, preferImageDecoder: Boolean): Bitmap? {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && preferImageDecoder) {
-            // ImageDecoder applies the photo's EXIF rotation; a software bitmap so pixels can be read.
-            val src = ImageDecoder.createSource(context.contentResolver, uri)
-            return ImageDecoder.decodeBitmap(src) { decoder, info, _ ->
-                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-                val longest = max(info.size.width, info.size.height)
-                if (longest > maxSide) {
-                    val s = maxSide.toFloat() / longest
-                    decoder.setTargetSize((info.size.width * s).roundToInt(), (info.size.height * s).roundToInt())
-                }
-            }.copy(Bitmap.Config.ARGB_8888, false)
-        }
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-        var sample = 1
-        while (max(bounds.outWidth, bounds.outHeight) / sample > maxSide) sample *= 2
-        val opts = BitmapFactory.Options().apply {
-            inSampleSize = sample
-            inPreferredConfig = Bitmap.Config.ARGB_8888
-        }
-        return context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
-    }
+    private fun decode(uri: Uri, maxSide: Int): Bitmap? = PictureDecoder.decode(context, uri, maxSide)
 
     companion object {
         const val PREFIX = "png:"
         const val MAX_SAVED = 6
-        private const val MAX_IMPORT_SIDE = 1600
+        private const val MAX_IMPORT_SIDE = 1200
+        private const val SWEEP_MIN_AGE_MS = 5 * 60_000L
         private val NAME = Regex("sig_[0-9_]+\\.png")
 
         fun decodeList(pref: String): List<String> =

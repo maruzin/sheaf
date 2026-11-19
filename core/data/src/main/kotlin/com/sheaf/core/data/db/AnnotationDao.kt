@@ -10,6 +10,10 @@ interface AnnotationDao {
     @Query("SELECT * FROM annotations WHERE documentId = :documentId ORDER BY createdAt")
     fun observeForDocument(documentId: Long): Flow<List<AnnotationEntity>>
 
+    /** Notes of every placed signature, in every document ("<image file>@<rotation>"). */
+    @Query("SELECT note FROM annotations WHERE type = 'Signature' AND note IS NOT NULL")
+    suspend fun signatureNotes(): List<String>
+
     @Upsert
     suspend fun upsert(entity: AnnotationEntity): Long
 

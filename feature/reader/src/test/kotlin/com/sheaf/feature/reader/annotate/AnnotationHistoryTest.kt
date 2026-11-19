@@ -116,5 +116,7 @@ class AnnotationHistoryTest {
         override suspend fun clearPage(documentId: Long, pageIndex: Int) {
             rows.values.removeAll { it.documentId == documentId && it.pageIndex == pageIndex }; flow.value++
         }
+        override suspend fun signatureImagesInUse(): Set<String> =
+            rows.values.mapNotNull { it.note?.substringBeforeLast('@') }.toSet()
     }
 }

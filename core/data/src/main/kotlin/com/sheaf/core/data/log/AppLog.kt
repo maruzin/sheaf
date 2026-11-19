@@ -60,7 +60,7 @@ object AppLog {
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
             runCatching {
                 val now = System.currentTimeMillis()
-                val report = "CRASH ${timestamp(now)} on thread '${thread.name}'\n$header\n${stackTrace(error)}"
+                val report = "CRASH ${timestamp(now)} on thread '${thread.name}'\n$header\n${scrub(stackTrace(error))}"
                 File(logDir, CRASH_FILE).writeText(report)
                 LogFiles.append(logDir, format(now, 'E', "Crash", "Uncaught on '${thread.name}'", error), MAX_BYTES)
             }
@@ -100,10 +100,22 @@ object AppLog {
     internal fun format(time: Long, level: Char, area: String, message: String, error: Throwable?): String =
         buildString {
             append(timestamp(time)).append(' ').append(level).append(" [").append(area).append("] ")
-            append(message.replace('\n', ' '))
+            append(scrub(message).replace('\n', ' '))
             append('\n')
-            if (error != null) append(stackTrace(error))
+            if (error != null) append(scrub(stackTrace(error)))
         }
+
+    /**
+     * The log promises never to hold document names: exception messages often quote a file path or
+     * a content URI ("…/share/Lease.pdf: ENOSPC"), so paths and URIs are replaced before writing.
+     */
+    internal fun scrub(text: String): String =
+        text.replace(URI, "<uri>").replace(PATH, "<path>")
+
+    private val URI = Regex("""\b(?:content|file)://[^\s:,;)\]'"]+""")
+    // File names contain spaces, so a path runs to the next colon, quote or line end (exception
+    // messages put ": reason" after the path). Over-scrubbing a few words is fine; leaking a name isn't.
+    private val PATH = Regex("""(?<![\w.])/(?:data|storage|sdcard|mnt|system/media)/[^\n:;)\]'"]+""")
 
     private fun timestamp(time: Long): String =
         SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS 'UTC'", Locale.US)
