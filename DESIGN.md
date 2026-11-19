@@ -5,7 +5,7 @@ description: Sheaf Android app design system (Jetpack Compose, Material 3). Toke
 colors:
   primary: "#E4713B"
   ember: "#E4713B"
-  ember-deep: "#C85A28"
+  ember-deep: "#B5501F"
   on-ember-dark: "#3A1608"
   dark-background: "#15171C"
   dark-on-background: "#ECEEF2"
@@ -58,9 +58,9 @@ PDF or book page carries the screen. Chosen at milestone M2.
 
 ## Colors
 
-- **Ember (#E4713B, dark) / Ember Deep (#C85A28, light):** the only accent. Primary actions, selection, progress, the active tab. Never large fills behind reading content.
+- **Ember (#E4713B, dark) / Ember Deep (#B5501F, light):** the only accent. Primary actions, selection, progress, the active tab. Never large fills behind reading content.
 - **Slate surfaces:** #15171C dark background, #F5F6F8 light background. Surface variants for sheets and toolbars.
-- **Known issue (lint 2026-11-19):** white on Ember Deep is 4.24:1, below WCAG AA 4.5:1 for normal text. Fix in `Theme.kt` (darken Ember Deep to about #B5501F, or use a dark on-primary) before release.
+- **Contrast (fixed 2026-11-19):** Ember Deep darkened from #C85A28 to #B5501F. White on it is 5.08:1 and it reads 4.70:1 as text on the light background, both WCAG AA.
 - **Material You** is opt-in (`dynamicColor = false` by default). Ember is the default identity.
 
 ## Typography

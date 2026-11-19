@@ -14,7 +14,7 @@ import androidx.compose.ui.platform.LocalContext
 // ---- Ember visual direction (chosen at M2) ----
 // Neutral slate surfaces + one warm ember accent. Document stays the hero.
 private val Ember = Color(0xFFE4713B)
-private val EmberDeep = Color(0xFFC85A28)
+private val EmberDeep = Color(0xFFB5501F) // darkened from C85A28 for WCAG AA: white 5.08:1, on background 4.70:1
 private val OnEmberDark = Color(0xFF3A1608)
 
 private val EmberDark = darkColorScheme(
