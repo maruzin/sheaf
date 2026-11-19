@@ -38,6 +38,7 @@ class AppViewModel @Inject constructor(
     settings: SettingsRepository,
     private val repository: DocumentRepository,
     private val renderFactory: PdfRenderSourceFactory,
+    private val imagePdf: com.sheaf.feature.reader.export.ImagePdfBuilder,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -71,14 +72,24 @@ class AppViewModel @Inject constructor(
                     } else {
                         null
                     }
-                    val name = queryDisplayName(src)
-                    val dir = File(context.filesDir, "opened").apply { mkdirs() }
-                    val out = File(dir, "open_${System.currentTimeMillis()}.pdf")
-                    val stream = if (canonical != null) canonical.inputStream() else context.contentResolver.openInputStream(src)
-                    val copied = stream?.use { input ->
-                        out.outputStream().use { output -> input.copyTo(output) }
-                        true
-                    } ?: false
+                    var name = queryDisplayName(src)
+                    val readable = if (canonical != null) Uri.fromFile(canonical) else src
+                    val out: File
+                    val copied: Boolean
+                    if (isImage(readable)) {
+                        // A shared photo or picture becomes a one-page PDF, ready to sign and share.
+                        out = imagePdf.imagesToPdf(listOf(readable)) ?: return@runCatching null
+                        name = name.substringBeforeLast('.') + ".pdf"
+                        copied = true
+                    } else {
+                        val dir = File(context.filesDir, "opened").apply { mkdirs() }
+                        out = File(dir, "open_${System.currentTimeMillis()}.pdf")
+                        val stream = if (canonical != null) canonical.inputStream() else context.contentResolver.openInputStream(src)
+                        copied = stream?.use { input ->
+                            out.outputStream().use { output -> input.copyTo(output) }
+                            true
+                        } ?: false
+                    }
                     if (!copied || out.length() == 0L) {
                         out.delete()
                         return@runCatching null
@@ -107,10 +118,20 @@ class AppViewModel @Inject constructor(
             }
             if (id == null) {
                 AppLog.w("OpenWith", "An \"Open with\" file could not be imported (unreadable, empty or refused)")
-                _openError.value = "Couldn't open that file. It may be damaged, not a PDF, or no longer available."
+                _openError.value = "Couldn't open that file. It may be damaged, not a PDF or picture, or no longer available."
             }
             _pendingOpenDoc.value = id
         }
+    }
+
+    private fun isImage(uri: Uri): Boolean {
+        val type = if (uri.scheme == "file") {
+            android.webkit.MimeTypeMap.getSingleton()
+                .getMimeTypeFromExtension(uri.lastPathSegment?.substringAfterLast('.', "")?.lowercase().orEmpty())
+        } else {
+            runCatching { context.contentResolver.getType(uri) }.getOrNull()
+        }
+        return type?.startsWith("image/") == true
     }
 
     /** The file's canonical location, or null if it is inside Sheaf's private data (or unresolvable). */

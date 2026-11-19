@@ -31,6 +31,11 @@ import com.sheaf.feature.reader.search.PdfOutlineExtractor
 import com.sheaf.feature.reader.search.PdfTextSearcher
 import com.sheaf.feature.reader.search.TextSearch
 import com.sheaf.core.domain.tabs.OpenTabsRepository
+import com.sheaf.feature.reader.export.DocumentExporter
+import com.sheaf.feature.reader.export.ExportFormat
+import com.sheaf.feature.reader.signature.SignaturePlacement
+import com.sheaf.feature.reader.signature.SignatureStore
+import com.sheaf.feature.reader.signature.SignatureStrokes
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -66,6 +71,8 @@ class ReaderViewModel @Inject constructor(
     private val billing: BillingManager,
     private val flattener: AnnotationFlattener,
     private val openTabs: OpenTabsRepository,
+    private val signatures: SignatureStore,
+    private val exporter: DocumentExporter,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ReaderUiState())
@@ -95,10 +102,7 @@ class ReaderViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            settings.signature.collect { enc ->
-                val pts = decodePoints(enc)
-                _state.update { it.copy(signaturePoints = pts, hasSignature = pts.isNotEmpty()) }
-            }
+            settings.signature.collect { pref -> onSignaturesChanged(pref) }
         }
         viewModelScope.launch {
             // Apply the user's default reading theme unless they already picked one in this session.
@@ -129,13 +133,28 @@ class ReaderViewModel @Inject constructor(
             is ReaderEvent.SetReflowScale ->
                 _state.update { it.copy(reflowScale = event.scale.coerceIn(MIN_REFLOW_SCALE, MAX_REFLOW_SCALE)) }
             is ReaderEvent.CloseTab -> viewModelScope.launch { openTabs.close(event.documentId) }
-            ReaderEvent.ToggleAnnotate -> _state.update { it.copy(annotating = !it.annotating) }
+            ReaderEvent.ToggleAnnotate -> _state.update {
+                it.copy(annotating = !it.annotating, signatureMode = false, selectedSignatureId = null)
+            }
             ReaderEvent.Undo -> stepHistory(undo = true)
             ReaderEvent.Redo -> stepHistory(undo = false)
             is ReaderEvent.SetInkColor -> _state.update { it.copy(inkColorArgb = event.argb) }
             is ReaderEvent.SetHighlighter -> _state.update { it.copy(highlighter = event.on, noteMode = false, signatureMode = false) }
             is ReaderEvent.SetNoteMode -> _state.update { it.copy(noteMode = event.on, signatureMode = false) }
-            is ReaderEvent.SetSignatureMode -> _state.update { it.copy(signatureMode = event.on, noteMode = false) }
+            is ReaderEvent.SetSignatureMode ->
+                _state.update { it.copy(signatureMode = event.on, noteMode = false, selectedSignatureId = null) }
+            ReaderEvent.StartSigning -> _state.update {
+                it.copy(annotating = true, signatureMode = true, noteMode = false, highlighter = false, formMode = false)
+            }
+            is ReaderEvent.SelectSignature -> _state.update { it.copy(selectedSignatureId = event.id) }
+            is ReaderEvent.ChooseSignature -> chooseSignature(event.name)
+            is ReaderEvent.ForgetSignature -> forgetSignature(event.name)
+            ReaderEvent.SaveToPhone -> prepareSave()
+            ReaderEvent.ConsumeSave -> _state.update { it.copy(pendingSave = null) }
+            is ReaderEvent.Export -> export(event.format)
+            ReaderEvent.ConsumeExport -> _state.update { it.copy(exportReady = null) }
+            ReaderEvent.OpenTextView -> openTextView()
+            ReaderEvent.CloseTextView -> _state.update { it.copy(textView = null) }
             ReaderEvent.ToggleFormMode -> _state.update { it.copy(formMode = !it.formMode) }
             is ReaderEvent.SetFormValue ->
                 _state.update { it.copy(formValues = it.formValues + (event.name to event.value)) }
@@ -487,20 +506,207 @@ class ReaderViewModel @Inject constructor(
         }
     }
 
+    /**
+     * The document as it should leave the app: form values filled in, then markup and signatures
+     * drawn in, with a protected document's password re-applied. [Output.temp] is false when nothing
+     * changed (the original file is used as is). Null on failure.
+     */
+    private suspend fun outputPdf(): Output? {
+        val s = _state.value
+        val base = textUri.ifBlank { s.uri }
+        if (!s.hasChanges) return Output(s.uri, temp = false)
+        var current = base
+        var temp: String? = null
+        if (s.formEdited) {
+            val filled = runCatching { formReader.fillAndSave(base, s.formValues) }.getOrNull() ?: return null
+            current = Uri.fromFile(File(filled)).toString()
+            temp = filled
+        }
+        if (s.annotationsByPage.isNotEmpty()) {
+            val flat = runCatching { flattener.flatten(current, s.annotationsByPage) }.getOrNull()
+            temp?.let { File(it).delete() }
+            temp = flat ?: return null
+        }
+        val kept = keepProtection(temp ?: return Output(s.uri, temp = false)) ?: return null
+        return Output(kept, temp = true)
+    }
+
+    private data class Output(val path: String, val temp: Boolean)
+
     private fun flattenAndShare() {
-        val uri = textUri.ifBlank { _state.value.uri }
-        val ann = _state.value.annotationsByPage
-        if (uri.isBlank() || ann.isEmpty()) return
+        if (_state.value.uri.isBlank() || !_state.value.hasChanges) return
         viewModelScope.launch {
             _state.update { it.copy(flattening = true) }
-            val path = keepProtection(runCatching { flattener.flatten(uri, ann) }.getOrNull())
+            val out = outputPdf()?.takeIf { it.temp }
+            AppLog.i("Share", if (out != null) "Shared the signed / marked-up copy" else "Building the share copy failed")
             _state.update {
                 it.copy(
                     flattening = false,
-                    flattenedPath = path,
-                    billingMessage = if (path == null) "Couldn't create the marked-up copy" else it.billingMessage,
+                    flattenedPath = out?.path,
+                    billingMessage = if (out == null) "Couldn't create the signed copy" else it.billingMessage,
                 )
             }
+        }
+    }
+
+    /** Builds the file to save (with any markup) and hands it to the UI's "Save to phone" picker. */
+    private fun prepareSave() {
+        val s = _state.value
+        if (s.uri.isBlank() || s.flattening) return
+        viewModelScope.launch {
+            _state.update { it.copy(flattening = true) }
+            val out = outputPdf()
+            val base = DocumentExporter.baseName(s.displayName)
+            val name = DocumentExporter.safeName(if (out?.temp == true) "$base (signed).pdf" else "$base.pdf")
+            _state.update {
+                it.copy(
+                    flattening = false,
+                    pendingSave = out?.let { o -> PendingSave(o.path, name, "application/pdf", o.temp) },
+                    billingMessage = if (out == null) "Couldn't prepare the copy to save" else it.billingMessage,
+                )
+            }
+        }
+    }
+
+    /** Writes [save] to [target] (from the system "Save" picker; null = cancelled). */
+    fun completeSave(save: PendingSave, target: Uri?) {
+        viewModelScope.launch {
+            val ok = target != null && exporter.writeTo(target, save.source)
+            if (save.temp) withContext(Dispatchers.IO) { File(save.source).delete() }
+            if (target != null) {
+                AppLog.i("Save", if (ok) "Saved a copy to the phone" else "Saving a copy failed")
+                _state.update {
+                    it.copy(billingMessage = if (ok) "Saved \"${save.suggestedName}\"" else "Couldn't save the file")
+                }
+            }
+        }
+    }
+
+    /** Writes exported [files] into the folder [tree] the user picked (null = cancelled). */
+    fun completeExportSave(files: List<File>, mime: String, tree: Uri?) {
+        if (tree == null) return
+        viewModelScope.launch {
+            val saved = exporter.writeAllTo(tree, files, mime)
+            _state.update {
+                it.copy(
+                    billingMessage = when (saved) {
+                        files.size -> if (saved == 1) "Saved \"${files[0].name}\"" else "Saved $saved files"
+                        0 -> "Couldn't save the files"
+                        else -> "Saved $saved of ${files.size} files"
+                    },
+                )
+            }
+        }
+    }
+
+    /** Saves one exported file to [target] from the system "Save as" picker (null = cancelled). */
+    fun completeExportSaveAs(file: File, target: Uri?) {
+        if (target == null) return
+        viewModelScope.launch {
+            val ok = exporter.writeTo(target, file.absolutePath)
+            _state.update { it.copy(billingMessage = if (ok) "Saved \"${file.name}\"" else "Couldn't save the file") }
+        }
+    }
+
+    /** Saves exported page pictures into the phone's Pictures/Sheaf album (Android 10+). */
+    @androidx.annotation.RequiresApi(android.os.Build.VERSION_CODES.Q)
+    fun saveExportToPictures(files: List<File>) {
+        viewModelScope.launch {
+            val saved = exporter.saveToPictures(files)
+            _state.update {
+                it.copy(
+                    billingMessage = when (saved) {
+                        0 -> "Couldn't save the pictures"
+                        files.size -> "Saved $saved picture${if (saved == 1) "" else "s"} to Pictures/Sheaf"
+                        else -> "Saved $saved of ${files.size} pictures to Pictures/Sheaf"
+                    },
+                )
+            }
+        }
+    }
+
+    /** Exports the document as JPG pages or as text (TXT / Word / Excel). Word and Excel are Pro. */
+    private fun export(format: ExportFormat) {
+        val s = _state.value
+        if (s.uri.isBlank() || s.exporting) return
+        if ((format == ExportFormat.Word || format == ExportFormat.Excel) && blockedByPaywall()) return
+        viewModelScope.launch {
+            _state.update { it.copy(exporting = true) }
+            val base = DocumentExporter.baseName(s.displayName)
+            val files: List<File> = when (format) {
+                ExportFormat.Pdf -> {
+                    val out = outputPdf()
+                    if (out == null) {
+                        emptyList()
+                    } else {
+                        val name = if (out.temp) "$base (signed).pdf" else "$base.pdf"
+                        listOfNotNull(exporter.copyForExport(out.path, name)).also {
+                            if (out.temp) withContext(Dispatchers.IO) { File(out.path).delete() }
+                        }
+                    }
+                }
+                ExportFormat.Jpg -> {
+                    // Pages as they leave the app: signatures, markup and form values included.
+                    val out = outputPdf()
+                    if (out == null) {
+                        emptyList()
+                    } else {
+                        val src = if (out.temp) Uri.fromFile(File(out.path)).toString() else out.path
+                        exporter.pagesToJpg(src, base, openPassword).also {
+                            if (out.temp) withContext(Dispatchers.IO) { File(out.path).delete() }
+                        }
+                    }
+                }
+                else -> {
+                    val texts = documentText(allowOcr = s.isPro)
+                    when {
+                        texts == null -> emptyList()
+                        texts.all { it.isBlank() } -> {
+                            _state.update {
+                                it.copy(
+                                    exporting = false,
+                                    billingMessage = if (it.isPro) "No text found in this document"
+                                    else "This is a scan: its text needs OCR (Pro) before exporting",
+                                    showPaywall = !it.isPro,
+                                )
+                            }
+                            if (!s.isPro) loadPrice()
+                            return@launch
+                        }
+                        else -> listOfNotNull(exporter.textFile(format, texts, base))
+                    }
+                }
+            }
+            AppLog.i("Export", "Export to ${format.extension}: ${files.size} file(s)")
+            _state.update {
+                it.copy(
+                    exporting = false,
+                    exportReady = files.takeIf { f -> f.isNotEmpty() }?.let { f -> ExportReady(f, format) },
+                    billingMessage = if (files.isEmpty()) "Couldn't export the document" else it.billingMessage,
+                )
+            }
+        }
+    }
+
+    /**
+     * Page texts from the text layer; for a scan with no text layer, OCR when [allowOcr].
+     * Null if reading failed.
+     */
+    private suspend fun documentText(allowOcr: Boolean): List<String>? {
+        val uri = textUri.ifBlank { _state.value.uri }
+        val texts = pageTexts(uri) ?: return null
+        if (texts.any { it.isNotBlank() } || !allowOcr) return texts
+        return runCatching { ocr.recognizeText(uri) }.getOrNull() ?: texts
+    }
+
+    private fun openTextView() {
+        if (_state.value.uri.isBlank()) return
+        _state.update { it.copy(textView = TextViewState(loading = true)) }
+        viewModelScope.launch {
+            val texts = documentText(allowOcr = _state.value.isPro).orEmpty()
+            val needsOcr = texts.all { it.isBlank() } && !_state.value.isPro
+            if (_state.value.textView == null) return@launch // closed while loading
+            _state.update { it.copy(textView = TextViewState(loading = false, pages = texts, needsOcr = needsOcr)) }
         }
     }
 
@@ -542,6 +748,7 @@ class ReaderViewModel @Inject constructor(
         viewModelScope.launch {
             annotationRepo.observeForDocument(documentId).collect { list ->
                 _state.update { it.copy(annotationsByPage = list.groupBy { a -> a.pageIndex }) }
+                loadSignatureImages(list.mapNotNull { a -> SignaturePlacement.of(a)?.image }.toSet())
             }
         }
     }
@@ -645,46 +852,127 @@ class ReaderViewModel @Inject constructor(
     private fun publishHistory() =
         _state.update { it.copy(canUndo = history.canUndo, canRedo = history.canRedo) }
 
-    fun saveSignature(points: List<NormPoint>) {
-        if (points.size < 2) return
-        viewModelScope.launch { settings.setSignature(encodePoints(points)) }
-    }
-
-    /** Stamp the saved signature centered at [at] on [pageIndex], in a fixed-size box. */
-    fun stampSignature(pageIndex: Int, at: NormPoint) {
-        val id = _state.value.documentId ?: return
-        val sig = _state.value.signaturePoints
-        if (sig.size < 2) return
-        val boxW = 0.4f
-        val boxH = 0.16f
-        val mapped = sig.map { p ->
-            NormPoint(
-                x = (at.x - boxW / 2f + p.x * boxW).coerceIn(0f, 1f),
-                y = (at.y - boxH / 2f + p.y * boxH).coerceIn(0f, 1f),
+    /** Saved-signature list changed (also migrates a pre-1.2 single-stroke signature). */
+    private suspend fun onSignaturesChanged(pref: String) {
+        var names = SignatureStore.decodeList(pref)
+        if (names.isEmpty()) {
+            val legacy = SignatureStrokes.decodeLegacy(pref)
+            if (legacy.size >= 2) {
+                signatures.fromLegacy(legacy)?.let { name ->
+                    runCatching { settings.setSignature(SignatureStore.encodeList(listOf(name))) }
+                    return // the new preference value comes back through the collector
+                }
+            }
+        }
+        names = names.filter { signatures.file(it) != null }
+        _state.update {
+            it.copy(
+                savedSignatures = names,
+                activeSignature = it.activeSignature?.takeIf { a -> a in names } ?: names.firstOrNull(),
             )
         }
-        addAnnotation(
-            Annotation(
-                documentId = id,
-                pageIndex = pageIndex,
-                type = AnnotationType.Ink,
-                colorArgb = 0xFF15171C.toInt(),
-                strokeWidth = 0.003f,
-                points = mapped,
-            ),
-        )
+        loadSignatureImages(names)
     }
 
-    private fun encodePoints(points: List<NormPoint>): String =
-        points.joinToString(";") { "${it.x},${it.y}" }
+    private suspend fun loadSignatureImages(names: Collection<String>) {
+        val missing = names.filter { it !in _state.value.signatureImages }
+        if (missing.isEmpty()) return
+        val loaded = missing.mapNotNull { n -> signatures.load(n)?.let { n to it } }
+        if (loaded.isNotEmpty()) _state.update { it.copy(signatureImages = it.signatureImages + loaded) }
+    }
 
-    private fun decodePoints(s: String): List<NormPoint> =
-        if (s.isBlank()) emptyList() else s.split(";").mapNotNull { p ->
-            val c = p.split(",")
-            val x = c.getOrNull(0)?.toFloatOrNull()
-            val y = c.getOrNull(1)?.toFloatOrNull()
-            if (x != null && y != null) NormPoint(x, y) else null
+    /** Saves hand-drawn [strokes] as a new signature and gets ready to place it. */
+    fun saveDrawnSignature(strokes: List<List<NormPoint>>, padW: Float, padH: Float, lineWidthPx: Float, colorArgb: Int) {
+        viewModelScope.launch {
+            _state.update { it.copy(signatureBusy = true) }
+            val name = signatures.saveDrawn(strokes, padW, padH, lineWidthPx, colorArgb)
+            if (name == null) {
+                _state.update { it.copy(signatureBusy = false, billingMessage = "Couldn't save the signature") }
+            } else {
+                adoptSignature(name)
+            }
         }
+    }
+
+    /** Cuts a signature out of a photo or picture and gets ready to place it. */
+    fun importSignature(uri: Uri) {
+        viewModelScope.launch {
+            _state.update { it.copy(signatureBusy = true) }
+            when (val r = signatures.import(uri)) {
+                is SignatureStore.ImportResult.Ok -> adoptSignature(r.name)
+                SignatureStore.ImportResult.NoInk -> _state.update {
+                    it.copy(
+                        signatureBusy = false,
+                        billingMessage = "No signature found. Sign on plain white paper with a dark pen and try again.",
+                    )
+                }
+                SignatureStore.ImportResult.Unreadable -> _state.update {
+                    it.copy(signatureBusy = false, billingMessage = "Couldn't read that picture")
+                }
+            }
+        }
+    }
+
+    private suspend fun adoptSignature(name: String) {
+        signatures.load(name)?.let { bmp -> _state.update { it.copy(signatureImages = it.signatureImages + (name to bmp)) } }
+        val names = listOf(name) + _state.value.savedSignatures
+        _state.update {
+            it.copy(
+                signatureBusy = false,
+                savedSignatures = names.distinct().take(SignatureStore.MAX_SAVED),
+                activeSignature = name,
+                annotating = true,
+                signatureMode = true,
+                noteMode = false,
+                selectedSignatureId = null,
+            )
+        }
+        runCatching { settings.setSignature(SignatureStore.encodeList(names)) }
+        AppLog.i("Signature", "Saved a new signature")
+    }
+
+    private fun chooseSignature(name: String) {
+        if (name !in _state.value.savedSignatures) return
+        _state.update { it.copy(activeSignature = name, annotating = true, signatureMode = true, selectedSignatureId = null) }
+    }
+
+    /** Removes a signature from the saved list. Documents already signed with it keep it. */
+    private fun forgetSignature(name: String) {
+        val names = _state.value.savedSignatures - name
+        _state.update {
+            it.copy(savedSignatures = names, activeSignature = it.activeSignature?.takeIf { a -> a != name } ?: names.firstOrNull())
+        }
+        viewModelScope.launch { runCatching { settings.setSignature(SignatureStore.encodeList(names)) } }
+    }
+
+    /**
+     * Places the active signature centred on [at] on [pageIndex] ([pageAspect] = height / width of the
+     * page as shown) and selects it, so it can be moved, resized and turned straight away.
+     */
+    fun placeSignature(pageIndex: Int, at: NormPoint, pageAspect: Float) {
+        val id = _state.value.documentId ?: return
+        val image = _state.value.activeSignature ?: return
+        viewModelScope.launch {
+            val placement = SignaturePlacement.new(image, at, signatures.aspect(image), pageAspect)
+            historyMutex.withLock {
+                val annotation = placement.toAnnotation(id, pageIndex)
+                val newId = runCatching { annotationRepo.upsert(annotation) }.getOrNull() ?: return@withLock
+                history.record(AnnotationOp.Added(annotation.copy(id = newId)))
+                _state.update { it.copy(selectedSignatureId = newId) }
+                publishHistory()
+            }
+        }
+    }
+
+    /** Commits a move / resize / turn of a placed signature (one undo step). */
+    fun updateSignature(annotation: Annotation, placement: SignaturePlacement) {
+        val after = placement.toAnnotation(annotation.documentId, annotation.pageIndex, annotation.id, annotation.createdAt)
+        if (after == annotation) return
+        edit {
+            annotationRepo.upsert(after)
+            AnnotationOp.Updated(before = annotation, after = after)
+        }
+    }
 
     /** Renders a page bitmap for the UI. Returns null if the source isn't ready or render fails. */
     suspend fun renderPage(pageIndex: Int, widthPx: Int, heightPx: Int): Bitmap? =

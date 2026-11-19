@@ -103,7 +103,7 @@ class PagesViewModel @Inject constructor(
             if (newId != null && sourceId != null) {
                 runCatching {
                     val existing = annotations.observeForDocument(sourceId).first()
-                    AnnotationRemap.remap(existing, s.items, newId).forEach { annotations.upsert(it) }
+                    AnnotationRemap.remap(existing, s.items, newId, ::aspectRatio).forEach { annotations.upsert(it) }
                 }
             }
             _state.update {

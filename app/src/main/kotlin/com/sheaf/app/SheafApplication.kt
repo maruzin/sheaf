@@ -42,8 +42,8 @@ class SheafApplication : Application() {
         val cutoff = System.currentTimeMillis() - SHARE_COPY_TTL_MS
         val dirs = listOf(File(cacheDir, "share"), File(cacheDir, "compressed"), File(cacheDir, "signed"))
         dirs.forEach { dir ->
-            dir.listFiles { f -> f.isFile && f.name.endsWith(".pdf") && f.lastModified() < cutoff }
-                ?.forEach { it.delete() }
+            // PDFs, exports (TXT / Word / Excel) and folders of exported JPG pages.
+            dir.listFiles { f -> f.lastModified() < cutoff }?.forEach { it.deleteRecursively() }
         }
     }
 

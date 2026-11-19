@@ -62,6 +62,7 @@ class ReaderViewModelTest {
     private val settings = mockk<SettingsRepository>(relaxed = true)
     private val security = mockk<PdfSecurity>(relaxed = true)
     private val tabs = FakeTabs()
+    private val signatureStore = mockk<com.sheaf.feature.reader.signature.SignatureStore>(relaxed = true)
 
     @Before
     fun setUp() {
@@ -98,6 +99,8 @@ class ReaderViewModelTest {
             billing = mockk<BillingManager>(relaxed = true),
             flattener = mockk<AnnotationFlattener>(relaxed = true),
             openTabs = tabs,
+            signatures = signatureStore,
+            exporter = mockk(relaxed = true),
         )
     }
 
@@ -150,6 +153,44 @@ class ReaderViewModelTest {
         assertEquals(setOf(1L), annotations.rows.keys)
         vm.saveStroke(0, stroke) // a new edit drops the redo stack
         assertFalse(vm.state.value.canRedo)
+    }
+
+    @Test
+    fun `signing places the active signature, selects it, and move plus undo go through history`() = runTest {
+        coEvery { settings.signature } returns flowOf("png:sig_1_2.png")
+        io.mockk.every { signatureStore.file("sig_1_2.png") } returns java.io.File("sig_1_2.png")
+        coEvery { signatureStore.aspect("sig_1_2.png") } returns 3f
+        val annotations = InMemoryAnnotations()
+        val vm = viewModel(annotationRepo = annotations)
+        vm.onEvent(ReaderEvent.Open(1))
+        assertTrue(vm.state.value.hasSignature)
+
+        vm.onEvent(ReaderEvent.StartSigning)
+        assertTrue(vm.state.value.annotating && vm.state.value.signatureMode)
+        vm.placeSignature(0, NormPoint(0.5f, 0.8f), pageAspect = 1.4142f)
+        val placed = annotations.rows.values.single()
+        assertEquals(placed.id, vm.state.value.selectedSignatureId)
+        val p = com.sheaf.feature.reader.signature.SignaturePlacement.of(placed)!!
+        assertEquals(p.w / 3f, p.h, 0.0001f)
+
+        vm.updateSignature(placed, p.copy(cx = 0.2f, rotation = 30f))
+        assertEquals(0.2f, com.sheaf.feature.reader.signature.SignaturePlacement.of(annotations.rows.values.single())!!.cx)
+        vm.onEvent(ReaderEvent.Undo) // back to where it was placed
+        assertEquals(p, com.sheaf.feature.reader.signature.SignaturePlacement.of(annotations.rows.values.single()))
+        vm.onEvent(ReaderEvent.Undo) // un-place
+        assertTrue(annotations.rows.isEmpty())
+        assertTrue(vm.state.value.hasChanges.not())
+    }
+
+    @Test
+    fun `Word and Excel export are Pro, JPG and TXT are free`() = runTest {
+        val vm = viewModel()
+        vm.onEvent(ReaderEvent.Open(1))
+        vm.onEvent(ReaderEvent.Export(com.sheaf.feature.reader.export.ExportFormat.Word))
+        assertTrue(vm.state.value.showPaywall)
+        vm.onEvent(ReaderEvent.DismissPaywall)
+        vm.onEvent(ReaderEvent.Export(com.sheaf.feature.reader.export.ExportFormat.Txt))
+        assertFalse(vm.state.value.showPaywall)
     }
 
     @Test

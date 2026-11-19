@@ -1,5 +1,13 @@
 package com.sheaf.feature.reader.library
 
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.ui.semantics.Role
+import com.sheaf.feature.reader.export.IdKind
+
 import com.sheaf.feature.reader.PaywallDialog
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
@@ -98,7 +106,12 @@ fun LibraryScreen(
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri: Uri? ->
-        if (uri != null) {
+        val isImage = uri != null && context.contentResolver.getType(uri)?.startsWith("image/") == true
+        if (uri != null && isImage) {
+            // A photo or picture becomes a PDF in the library, so it can be signed and shared.
+            val (name, _) = queryNameAndSize(context, uri)
+            viewModel.onImagesPicked(listOf(uri), name.substringBeforeLast('.') + ".pdf")
+        } else if (uri != null) {
             // Persist read permission so the document reopens across app restarts.
             runCatching {
                 context.contentResolver.takePersistableUriPermission(
@@ -159,6 +172,50 @@ fun LibraryScreen(
     val proPrice by viewModel.proPrice.collectAsStateWithLifecycle()
     val isPro by viewModel.isPro.collectAsStateWithLifecycle()
 
+    // Photos → PDF: pick several pictures; each becomes a page, in the order picked.
+    val photosPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(),
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            val stamp = java.text.SimpleDateFormat("yyyy-MM-dd HH.mm", java.util.Locale.getDefault()).format(java.util.Date())
+            viewModel.onImagesPicked(uris, "Photos $stamp.pdf")
+        }
+    }
+    // ID card / passport: scan front and back, then choose the document type and an optional watermark.
+    var idSides by remember { mutableStateOf<List<Uri>?>(null) }
+    val idScanner = remember {
+        GmsDocumentScanning.getClient(
+            GmsDocumentScannerOptions.Builder()
+                .setGalleryImportAllowed(true)
+                .setPageLimit(2)
+                .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
+                .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
+                .build(),
+        )
+    }
+    val idScanLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult(),
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val pages = GmsDocumentScanningResult.fromActivityResultIntent(result.data)?.pages.orEmpty()
+            if (pages.isNotEmpty()) idSides = pages.map { it.imageUri }
+        }
+    }
+    // Without the scanner (no Google Play services module), pick the front and back photos instead.
+    val idPhotosPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(maxItems = 2),
+    ) { uris: List<Uri> -> if (uris.isNotEmpty()) idSides = uris }
+    val startIdScan: () -> Unit = {
+        (context as? Activity)?.let { activity ->
+            idScanner.getStartScanIntent(activity)
+                .addOnSuccessListener { idScanLauncher.launch(IntentSenderRequest.Builder(it).build()) }
+                .addOnFailureListener {
+                    Toast.makeText(context, "Scanner isn't available. Choose photos of the front and back.", Toast.LENGTH_LONG).show()
+                    idPhotosPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                }
+        }
+    }
+
     // Merge: pick several PDFs at once; they are joined in the order the picker returns them.
     val mergePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments(),
@@ -187,6 +244,20 @@ fun LibraryScreen(
                         }
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                             DropdownMenuItem(
+                                text = { Text("ID card or passport copy") },
+                                onClick = {
+                                    menuOpen = false
+                                    startIdScan()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Photos to PDF") },
+                                onClick = {
+                                    menuOpen = false
+                                    photosPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                                },
+                            )
+                            DropdownMenuItem(
                                 text = { Text(if (isPro) "Merge PDFs" else "Merge PDFs  ·  PRO") },
                                 onClick = {
                                     menuOpen = false
@@ -200,12 +271,13 @@ fun LibraryScreen(
         },
         floatingActionButton = {
             ExtendedFloatingActionButton(
-                text = { Text("Open PDF") },
+                text = { Text("Open file") },
                 icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                onClick = { picker.launch(arrayOf("application/pdf")) },
+                // PDFs, and photos / pictures (turned into a PDF so they can be signed).
+                onClick = { picker.launch(arrayOf("application/pdf", "image/*")) },
                 // M3's extended FAB clears its text from the accessibility tree, which left TalkBack
                 // announcing an unlabeled "Button" (found by the device tests). Label it explicitly.
-                modifier = Modifier.semantics { contentDescription = "Open PDF" },
+                modifier = Modifier.semantics { contentDescription = "Open file" },
             )
         },
     ) { padding ->
@@ -248,6 +320,17 @@ fun LibraryScreen(
                 }
             }
         }
+    }
+
+    idSides?.let { sides ->
+        IdCopyDialog(
+            sides = sides.size,
+            onDismiss = { idSides = null },
+            onCreate = { kind, watermark ->
+                viewModel.makeIdCopy(sides[0], sides.getOrNull(1), kind, watermark)
+                idSides = null
+            },
+        )
     }
 
     if (showPaywall) {
@@ -417,4 +500,45 @@ private fun formatSize(bytes: Long): String = when {
     bytes >= 1_000_000 -> "%.1f MB".format(bytes / 1_000_000.0)
     bytes >= 1_000 -> "%.0f KB".format(bytes / 1_000.0)
     else -> "$bytes B"
+}
+
+@Composable
+private fun IdCopyDialog(sides: Int, onDismiss: () -> Unit, onCreate: (IdKind, String) -> Unit) {
+    var kind by remember { mutableStateOf(IdKind.IdCard) }
+    var watermark by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("ID copy") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(if (sides >= 2) "Front and back go on one A4 page, at real size." else "The scan goes on an A4 page, at real size.")
+                IdKind.entries.forEach { k ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .selectable(selected = k == kind, role = Role.RadioButton) { kind = k },
+                    ) {
+                        RadioButton(selected = k == kind, onClick = null)
+                        Text(k.label, modifier = Modifier.padding(start = 8.dp))
+                    }
+                }
+                OutlinedTextField(
+                    value = watermark,
+                    onValueChange = { watermark = it.take(60) },
+                    singleLine = true,
+                    label = { Text("Watermark (optional)") },
+                    placeholder = { Text("Copy for rental application only") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "A watermark says what the copy is for, so it can't be reused elsewhere.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = { Button(onClick = { onCreate(kind, watermark) }) { Text("Create PDF") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }

@@ -16,6 +16,11 @@ import com.tom_roush.pdfbox.pdmodel.graphics.color.PDColor
 import com.tom_roush.pdfbox.pdmodel.graphics.color.PDDeviceRGB
 import com.tom_roush.pdfbox.pdmodel.graphics.state.PDExtendedGraphicsState
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationText
+import com.tom_roush.pdfbox.pdmodel.graphics.image.LosslessFactory
+import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
+import com.tom_roush.pdfbox.util.Matrix
+import com.sheaf.feature.reader.signature.SignaturePlacement
+import com.sheaf.feature.reader.signature.SignatureStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
@@ -26,11 +31,13 @@ import javax.inject.Inject
 /**
  * Draws overlay annotations into the PDF content so they travel with the file. Ink/highlight strokes
  * are drawn on the page content stream (highlights at 30% alpha, wider); notes become real PDF sticky
- * notes. Coordinates are page-normalized (0..1, top-left origin) → PDF points (bottom-left origin).
+ * notes, signatures are drawn as transparent images (moved, scaled and turned as placed).
+ * Coordinates are page-normalized (0..1, top-left origin) → PDF points (bottom-left origin).
  */
 class PdfBoxAnnotationFlattener @Inject constructor(
     @ApplicationContext private val context: Context,
     private val io: CoroutineDispatcher,
+    private val signatures: SignatureStore,
 ) : AnnotationFlattener {
 
     override suspend fun flatten(
@@ -46,13 +53,17 @@ class PdfBoxAnnotationFlattener @Inject constructor(
             context.contentResolver.openInputStream(uri.toUri())?.use { input ->
                 PDDocument.load(input, PdfBoxMemory.setting()).use { doc ->
                     val pages = doc.pages.toList()
+                    // One embedded image per signature file, however many times it is placed.
+                    val images = HashMap<String, PDImageXObject>()
                     annotationsByPage.forEach { (pageIndex, list) ->
                         val page = pages.getOrNull(pageIndex) ?: return@forEach
                         // Annotations are measured on the page as displayed (crop box + /Rotate).
                         val frame = PageFrame.of(page)
                         val pw = frame.displayWidth
 
-                        val strokes = list.filter { it.type != AnnotationType.Note && it.points.size >= 2 }
+                        val strokes = list.filter {
+                            it.type != AnnotationType.Note && it.type != AnnotationType.Signature && it.points.size >= 2
+                        }
                         if (strokes.isNotEmpty()) {
                             val cs = PDPageContentStream(doc, page, PDPageContentStream.AppendMode.APPEND, true, true)
                             runCatching {
@@ -74,6 +85,31 @@ class PdfBoxAnnotationFlattener @Inject constructor(
                                 }
                             }
                             cs.close()
+                        }
+
+                        val placed = list.mapNotNull { SignaturePlacement.of(it) }
+                        if (placed.isNotEmpty()) {
+                            val aspect = frame.displayHeight / frame.displayWidth.coerceAtLeast(1f)
+                            val cs = PDPageContentStream(doc, page, PDPageContentStream.AppendMode.APPEND, true, true)
+                            try {
+                                for (p in placed) {
+                                    val image = images[p.image] ?: signatures.load(p.image)
+                                        ?.let { LosslessFactory.createFromImage(doc, it) }
+                                        ?.also { images[p.image] = it }
+                                    if (image == null) {
+                                        AppLog.w("Flatten", "A placed signature's image is missing; skipped")
+                                        continue
+                                    }
+                                    val (bl, br, tl) = p.imageCorners(aspect)
+                                    val (ox, oy) = frame.toPdf(bl.x, bl.y)
+                                    val (rx, ry) = frame.toPdf(br.x, br.y)
+                                    val (tx, ty) = frame.toPdf(tl.x, tl.y)
+                                    // Unit square → the placed box: x axis along the bottom edge, y up the left edge.
+                                    cs.drawImage(image, Matrix(rx - ox, ry - oy, tx - ox, ty - oy, ox, oy))
+                                }
+                            } finally {
+                                cs.close()
+                            }
                         }
 
                         list.filter { it.type == AnnotationType.Note }.forEach { a ->

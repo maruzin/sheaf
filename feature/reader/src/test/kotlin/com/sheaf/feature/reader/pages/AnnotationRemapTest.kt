@@ -34,4 +34,17 @@ class AnnotationRemapTest {
         val p = NormPoint(0.2f, 0.3f)
         assertEquals(p, AnnotationRemap.rotate(AnnotationRemap.rotate(p, 90), 270))
     }
+
+    @Test
+    fun `signatures turn with their page and keep their real size`() {
+        val sig = com.sheaf.feature.reader.signature.SignaturePlacement("sig_1.png", 0.2f, 0.1f, 0.3f, 0.1f)
+            .toAnnotation(documentId = 1, pageIndex = 0, id = 7)
+        val out = AnnotationRemap.remap(listOf(sig), listOf(PageItem(0, 90)), newDocumentId = 2) { 1.5f }.single()
+        val p = com.sheaf.feature.reader.signature.SignaturePlacement.of(out)!!
+        assertEquals(2L, out.documentId)
+        assertEquals(0L, out.id)
+        assertEquals(0.9f, p.cx, 0.0001f)
+        assertEquals(0.2f, p.w, 0.0001f)
+        assertEquals(90f, p.rotation, 0.0001f)
+    }
 }

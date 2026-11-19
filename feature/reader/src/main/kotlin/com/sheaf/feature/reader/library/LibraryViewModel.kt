@@ -1,5 +1,8 @@
 package com.sheaf.feature.reader.library
 
+import com.sheaf.feature.reader.export.IdKind
+import com.sheaf.feature.reader.export.ImagePdfBuilder
+
 import com.sheaf.core.data.log.AppLog
 import com.sheaf.core.domain.tabs.OpenTabsRepository
 import androidx.core.graphics.createBitmap
@@ -47,6 +50,7 @@ class LibraryViewModel @Inject constructor(
     private val merger: PdfMerger,
     private val settings: SettingsRepository,
     private val billing: BillingManager,
+    private val imagePdf: ImagePdfBuilder,
 ) : ViewModel() {
 
     // --- Pro: merge PDFs -------------------------------------------------------------------------
@@ -210,6 +214,38 @@ class LibraryViewModel @Inject constructor(
     }
 
     fun consumeError() { _error.value = null }
+
+    /** Photos or pictures → one PDF (a page each), added to the library and opened, ready to sign. */
+    fun onImagesPicked(uris: List<Uri>, displayName: String) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            _busy.value = true
+            val file = imagePdf.imagesToPdf(uris)
+            _busy.value = false
+            if (file == null) {
+                _error.value = "Couldn't turn that picture into a PDF"
+                return@launch
+            }
+            AppLog.i("Library", "Made a PDF from ${uris.size} picture(s)")
+            onDocumentPicked(Uri.fromFile(file).toString(), displayName, file.length())
+        }
+    }
+
+    /** Front (and back) of an ID card or passport, true to size on one A4 page, optionally watermarked. */
+    fun makeIdCopy(front: Uri, back: Uri?, kind: IdKind, watermark: String) {
+        viewModelScope.launch {
+            _busy.value = true
+            val file = imagePdf.idCopy(front, back, kind, watermark)
+            _busy.value = false
+            if (file == null) {
+                _error.value = "Couldn't make the ID copy"
+                return@launch
+            }
+            val stamp = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
+            AppLog.i("Library", "Made an ID copy (${kind.name}, ${if (back != null) 2 else 1} side(s))")
+            onDocumentPicked(Uri.fromFile(file).toString(), "${kind.label} copy $stamp.pdf", file.length())
+        }
+    }
 
     /**
      * Removes a document from the library (and its annotations). Files Sheaf created itself

@@ -15,7 +15,13 @@ data class Annotation(
     val createdAt: Long = System.currentTimeMillis(),
 )
 
-enum class AnnotationType { Ink, Highlight, Underline, Strikethrough, Note }
+/** Stored by name, so new values are appended (older app versions read unknown names as Ink). */
+enum class AnnotationType {
+    Ink, Highlight, Underline, Strikethrough, Note,
+
+    /** A placed signature image: see feature/reader SignaturePlacement for the point/note encoding. */
+    Signature,
+}
 
 /** A point in page-normalized space; (0,0) = top-left, (1,1) = bottom-right of the page. */
 data class NormPoint(val x: Float, val y: Float)

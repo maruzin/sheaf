@@ -29,12 +29,17 @@ READ COMFORTABLY
 • Picks up exactly where you left off in every document
 • Library and document side by side on large tablets and unfolded foldables
 
-ANNOTATE & SIGN
+SIGN ANY DOCUMENT
+• Draw your signature with your finger, or photograph it on paper: Sheaf removes the paper and keeps only your ink
+• Save several signatures (full signature and initials) and reuse them in a tap
+• Place it anywhere, then drag to move, resize or turn it to fit the line
+• Sign PDFs, photos and pictures: any image becomes a PDF you can sign
+• Share the signed copy straight to email, WhatsApp or Drive, or save it to your phone
+
+ANNOTATE
 • Highlight passages and draw with a pen in six colours
 • Add sticky notes anywhere on a page
-• Create your signature once and sign any document in a tap
-• All annotations in one list. Jump straight to any of them
-• Share a flattened copy with your markup and signature built in
+• All annotations in one list, with undo and redo
 
 FILL PDF FORMS
 • Fill in interactive PDF form fields right on the page
@@ -47,6 +52,13 @@ ORGANISE PAGES
 SCAN TO PDF
 • Scan paper documents with automatic edge detection and cropping
 • Multi-page scans go straight into your library as clean PDFs
+• Turn photos from your gallery into a PDF
+• ID card and passport copies: front and back on one A4 page at real size, with an optional watermark
+
+EXPORT AND TEXT
+• Export pages as JPG images, or text as TXT, Word or Excel
+• Copy, edit and share a document's text, or open it in Google Translate
+• Save any document or export to your phone, in the folder you choose
 
 OPEN PROTECTED PDFS
 • Open password-protected PDFs. The unlocked copy is deleted as soon as you close it
@@ -56,6 +68,8 @@ SHEAF PRO: ONE-TIME PURCHASE, NO SUBSCRIPTION
 • Compress PDF: reduce file size for email and upload
 • Password-protect a PDF with AES encryption
 • Merge several PDFs into one
+• Export to Word and Excel
+• Copy and export text from scanned documents
 
 PRIVATE BY DESIGN
 Sheaf works offline and processes your files locally. Scanning and OCR use Google ML Kit
@@ -72,9 +86,10 @@ landlords and teams who sign, fill and read documents every day.
 Productivity
 
 ## Search terms we target (for tracking, not for pasting into Play)
-Primary: pdf reader, pdf editor, pdf viewer, sign pdf, fill pdf form
+Primary: pdf reader, pdf editor, pdf viewer, sign pdf, fill pdf form, sign documents, e-signature
 Secondary: pdf scanner, scan to pdf, ocr pdf, compress pdf, annotate pdf, night mode pdf,
-password pdf, pdf reader no ads, offline pdf reader
+password pdf, pdf reader no ads, offline pdf reader, pdf to word, pdf to jpg, pdf to excel,
+id card scanner, photo to pdf
 
 ## Screenshot plan (8 phone shots, 1080x2400, caption on each)
 Most users decide from the first 3 screenshots. Lead with the reasons people switch apps.

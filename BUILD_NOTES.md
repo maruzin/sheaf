@@ -4,6 +4,42 @@ Running engineering log. Newest first. Every non-obvious decision gets one line 
 
 ---
 
+## 1.2.0 (versionCode 9), 2026-11-19: signing rebuilt, exports, ID copies, text tools
+- **Signature pad bug (shipped in vc8):** the pad cleared on every new stroke, so only the last stroke
+  of a signature survived. New pad keeps every stroke (dots included), with Undo, Clear and black/blue ink.
+- **Signatures are images now** (`signature/`): drawn strokes are rendered to a transparent PNG; photos
+  are cut out by `SignatureInk` (local paper brightness to remove shadows, Otsu threshold taking the
+  middle of tied splits, one ink colour, soft edges, crop). Stored in noBackupFilesDir; up to 6 saved
+  (signature + initials). Placed signatures reference their own file, so changing your signature never
+  alters signed documents. Pre-1.2 single-stroke signatures migrate automatically.
+- **Placement** (`SignaturePlacement`, `SignatureGestures`): tap to place, drag to move, handles to resize
+  (proportions kept), turn (snaps within 4 degrees of a quarter turn) or delete (top-left, opposite the
+  resize handle so small boxes stay easy to hit). Boxes stay on the page. Size is stored as fractions of
+  page width so a turned box never stretches; turning a page in Manage pages turns its signatures.
+  The flattener draws the PNG with an affine matrix through `PageFrame`, so rotated / cropped pages match
+  the screen (checked by exporting to JPG and in macOS Preview).
+- **Sign button** (FAB) on every document; Share now sends the signed / filled / marked-up copy
+  ("Name (signed).pdf"); "Share original" stays in the menu. Form values and signatures go out together.
+- **Save to phone:** system "Save as" picker (no storage permission). Multi-page JPG exports go straight to
+  Pictures/Sheaf via MediaStore on Android 10+ (the folder picker's "access current and future files"
+  prompt was too heavy for one export, and Android blocks picking Downloads as a folder).
+- **Exports** (`export/`): PDF (signed copy, first in the list), JPG pages (~200 dpi, markup included), TXT, Word (.docx) and Excel (.xlsx).
+  Office files are written by a small ECMA-376 writer (`OfficeWriters`) instead of Apache POI (~10 MB of
+  dex for the same few XML parts); text only, layout not reproduced. Word/Excel are Pro, JPG/TXT free.
+- **Text view:** copy, edit, share, Translate (targets Google Translate directly; the emulator showed a
+  generic process-text intent lands in "Read aloud"). Scans need OCR (Pro) first.
+- **Pictures to PDF:** "Open file" accepts images; "Photos to PDF" (multi-select); photos shared to Sheaf
+  (SEND image/*, no VIEW so Sheaf never poses as an image viewer) open as PDFs ready to sign.
+- **ID card / passport copy:** ML Kit scanner (2 sides, JPEG) or gallery fallback when the scanner module
+  is unavailable; true size (ID-1 85.6 x 54 mm, ID-3 125 x 88 mm) on A4 with an optional diagonal watermark.
+- Share-copy purge now deletes every export (files and JPG folders) older than an hour.
+- Tests: 94 unit (was 66) incl. Robolectric native-graphics tests of signing, photo cut-out, ID copy,
+  pictures to PDF and Office exports; 9 device tests (new: multi-stroke sign, place, move). Manual pass
+  on the Android 15 emulator: draw, photo import, place, resize, turn, delete handle, Done, JPG export,
+  Save to phone (PDF + JPG), Share sheet, text view, Translate, Pro gate, Photos to PDF.
+- Not verified here: the ML Kit scanner (needs Play services' module, unavailable on this emulator),
+  Google Translate hand-off (not installed on the emulator), and Android 8/9 save paths.
+
 ## 1.1.0 (versionCode 8), 2026-11-18: portrait screen no longer required
 - Play blocked review: "Required hardware feature declarations are restricting your app's availability:
   android.hardware.screen.portrait". Source: ML Kit's `GmsDocumentScanningDelegateActivity` is locked to

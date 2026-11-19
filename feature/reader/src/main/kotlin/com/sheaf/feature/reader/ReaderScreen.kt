@@ -65,6 +65,21 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import com.sheaf.feature.reader.export.ExportDialog
+import com.sheaf.feature.reader.export.ExportReadyDialog
+import com.sheaf.feature.reader.export.TextViewDialog
+import com.sheaf.feature.reader.export.shareFiles
+import com.sheaf.feature.reader.signature.LiveSignature
+import com.sheaf.feature.reader.signature.SignatureBar
+import com.sheaf.feature.reader.signature.SignatureDialog
+import com.sheaf.feature.reader.signature.SignaturePlacement
+import com.sheaf.feature.reader.signature.drawSignatures
+import com.sheaf.feature.reader.signature.signatureGestures
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -218,7 +233,14 @@ fun ReaderScreen(
     }
     LaunchedEffect(state.flattenedPath) {
         state.flattenedPath?.let { path ->
-            shareFilledPdf(context, path, state.displayName, "marked up")
+            // Recipients see what the copy is: "Lease (signed).pdf", "(filled)" or "(marked up)".
+            val signed = state.annotationsByPage.values.any { list -> list.any { it.type == AnnotationType.Signature } }
+            val suffix = when {
+                signed -> "signed"
+                state.annotationsByPage.isEmpty() && state.formEdited -> "filled"
+                else -> "marked up"
+            }
+            shareFilledPdf(context, path, state.displayName, suffix)
             viewModel.onEvent(ReaderEvent.ConsumeFlattened)
         }
     }
@@ -229,7 +251,40 @@ fun ReaderScreen(
     LaunchedEffect(state.uri) { if (state.uri.isNotBlank()) zoom = state.zoom }
     var menuOpen by remember { mutableStateOf(false) }
     var showProtect by remember { mutableStateOf(false) }
-    var showSignatureCapture by remember { mutableStateOf(false) }
+    var showSignatureDialog by remember { mutableStateOf(false) }
+    var showExportDialog by remember { mutableStateOf(false) }
+    // The picker result arrives after the state was consumed: hold the request here meanwhile.
+    var saveRequest by remember { mutableStateOf<PendingSave?>(null) }
+    var exportToSave by remember { mutableStateOf<ExportReady?>(null) }
+    val saveLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/pdf"),
+    ) { target ->
+        saveRequest?.let { viewModel.completeSave(it, target) }
+        saveRequest = null
+    }
+    // One "Save as" launcher per export type, so the picker knows the file type and keeps the extension.
+    var exportFileToSave by remember { mutableStateOf<File?>(null) }
+    val saveAsLaunchers = com.sheaf.feature.reader.export.ExportFormat.entries.associateWith { format ->
+        rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(format.mime)) { target ->
+            exportFileToSave?.let { viewModel.completeExportSaveAs(it, target) }
+            exportFileToSave = null
+        }
+    }
+    val folderLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
+        exportToSave?.let { viewModel.completeExportSave(it.files, it.format.mime, tree) }
+        exportToSave = null
+    }
+    LaunchedEffect(state.pendingSave) {
+        state.pendingSave?.let { save ->
+            viewModel.onEvent(ReaderEvent.ConsumeSave)
+            saveRequest = save
+            runCatching { saveLauncher.launch(save.suggestedName) }.onFailure {
+                Toast.makeText(context, "No app available to save files", Toast.LENGTH_LONG).show()
+                viewModel.completeSave(save, null)
+                saveRequest = null
+            }
+        }
+    }
     var pendingNote by remember { mutableStateOf<Pair<Int, NormPoint>?>(null) }
     var editingNote by remember { mutableStateOf<Annotation?>(null) }
 
@@ -295,7 +350,14 @@ fun ReaderScreen(
                         IconButton(onClick = { viewModel.onEvent(ReaderEvent.ToggleSearch) }) {
                             Icon(Icons.Filled.Search, contentDescription = "Search")
                         }
-                        IconButton(onClick = { if (state.uri.isNotBlank()) shareScope.launch { shareDocument(context, state.uri, state.displayName) } }) {
+                        IconButton(
+                            onClick = {
+                                // Signed / marked-up / filled documents are shared with those changes in.
+                                if (state.hasChanges) viewModel.onEvent(ReaderEvent.FlattenShare)
+                                else if (state.uri.isNotBlank()) shareScope.launch { shareDocument(context, state.uri, state.displayName) }
+                            },
+                            enabled = !state.flattening,
+                        ) {
                             Icon(Icons.Filled.Share, contentDescription = "Share")
                         }
                         IconButton(onClick = { menuOpen = true }) {
@@ -323,13 +385,43 @@ fun ReaderScreen(
                                     state.documentId?.let { onManagePages(it) }
                                 },
                             )
-                            if (state.annotationsByPage.isNotEmpty()) {
+                            DropdownMenuItem(
+                                text = { Text("Sign") },
+                                onClick = {
+                                    menuOpen = false
+                                    if (state.hasSignature) viewModel.onEvent(ReaderEvent.StartSigning)
+                                    else showSignatureDialog = true
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(if (state.flattening) "Preparing…" else "Save to phone") },
+                                enabled = !state.flattening,
+                                onClick = {
+                                    menuOpen = false
+                                    viewModel.onEvent(ReaderEvent.SaveToPhone)
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(if (state.exporting) "Exporting…" else "Export as JPG, Word, Excel, TXT") },
+                                enabled = !state.exporting,
+                                onClick = {
+                                    menuOpen = false
+                                    showExportDialog = true
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Copy, edit or translate text") },
+                                onClick = {
+                                    menuOpen = false
+                                    viewModel.onEvent(ReaderEvent.OpenTextView)
+                                },
+                            )
+                            if (state.hasChanges) {
                                 DropdownMenuItem(
-                                    text = { Text(if (state.flattening) "Preparing…" else "Share with markup") },
-                                    enabled = !state.flattening,
+                                    text = { Text("Share original (without changes)") },
                                     onClick = {
                                         menuOpen = false
-                                        viewModel.onEvent(ReaderEvent.FlattenShare)
+                                        if (state.uri.isNotBlank()) shareScope.launch { shareDocument(context, state.uri, state.displayName) }
                                     },
                                 )
                             }
@@ -416,7 +508,21 @@ fun ReaderScreen(
                         onNext = { viewModel.onEvent(ReaderEvent.NextResult) },
                     )
                 }
-                if (state.annotating) {
+                if (state.annotating && state.signatureMode) {
+                    SignatureBar(
+                        saved = state.savedSignatures,
+                        images = state.signatureImages,
+                        active = state.activeSignature,
+                        busy = state.signatureBusy,
+                        canUndo = state.canUndo,
+                        canRedo = state.canRedo,
+                        onUndo = { viewModel.onEvent(ReaderEvent.Undo) },
+                        onRedo = { viewModel.onEvent(ReaderEvent.Redo) },
+                        onChoose = { viewModel.onEvent(ReaderEvent.ChooseSignature(it)) },
+                        onNew = { showSignatureDialog = true },
+                        onDone = { viewModel.onEvent(ReaderEvent.ToggleAnnotate) },
+                    )
+                } else if (state.annotating) {
                     InkToolbar(
                         selected = state.inkColorArgb,
                         highlighter = state.highlighter,
@@ -425,10 +531,10 @@ fun ReaderScreen(
                         onTool = { viewModel.onEvent(ReaderEvent.SetHighlighter(it)) },
                         onNote = { viewModel.onEvent(ReaderEvent.SetNoteMode(true)) },
                         onSignature = {
-                            if (state.hasSignature) viewModel.onEvent(ReaderEvent.SetSignatureMode(true))
-                            else showSignatureCapture = true
+                            if (state.hasSignature) viewModel.onEvent(ReaderEvent.StartSigning)
+                            else showSignatureDialog = true
                         },
-                        onRedraw = { showSignatureCapture = true },
+                        onRedraw = { showSignatureDialog = true },
                         onColor = { viewModel.onEvent(ReaderEvent.SetInkColor(it)) },
                         onClearPage = { viewModel.clearPageAnnotations(state.currentPage) },
                         canUndo = state.canUndo,
@@ -452,6 +558,21 @@ fun ReaderScreen(
                         onSave = { viewModel.onEvent(ReaderEvent.SaveForm) },
                     )
                 }
+            }
+        },
+        floatingActionButton = {
+            val canSign = !state.isLoading && state.error == null && state.pageCount > 0 &&
+                !state.reflow && !state.annotating && !state.formMode
+            if (canSign) {
+                ExtendedFloatingActionButton(
+                    text = { Text("Sign") },
+                    icon = { Icon(Icons.Filled.Gesture, contentDescription = null) },
+                    onClick = {
+                        if (state.hasSignature) viewModel.onEvent(ReaderEvent.StartSigning)
+                        else showSignatureDialog = true
+                    },
+                    modifier = Modifier.semantics { contentDescription = "Sign document" },
+                )
             }
         },
     ) { padding ->
@@ -496,7 +617,15 @@ fun ReaderScreen(
                     onTapNote = { page, pt -> pendingNote = page to pt },
                     onEditNote = { ann -> editingNote = ann },
                     signatureMode = state.signatureMode,
-                    onStampSignature = { page, pt -> viewModel.stampSignature(page, pt) },
+                    signatureImages = state.signatureImages,
+                    selectedSignatureId = state.selectedSignatureId,
+                    onPlaceSignature = { page, pt, aspect -> viewModel.placeSignature(page, pt, aspect) },
+                    onUpdateSignature = { ann, placement -> viewModel.updateSignature(ann, placement) },
+                    onSelectSignature = { viewModel.onEvent(ReaderEvent.SelectSignature(it)) },
+                    onDeleteSignature = { id ->
+                        viewModel.onEvent(ReaderEvent.SelectSignature(null))
+                        viewModel.deleteAnnotation(id)
+                    },
                     formMode = state.formMode,
                     formFieldsByPage = formByPage,
                     formValues = state.formValues,
@@ -612,13 +741,66 @@ fun ReaderScreen(
         )
     }
 
-    if (showSignatureCapture) {
-        SignatureCaptureDialog(
-            onDismiss = { showSignatureCapture = false },
-            onSave = { pts ->
-                viewModel.saveSignature(pts)
-                showSignatureCapture = false
-                viewModel.onEvent(ReaderEvent.SetSignatureMode(true))
+    if (showSignatureDialog) {
+        SignatureDialog(
+            saved = state.savedSignatures,
+            images = state.signatureImages,
+            onDismiss = { showSignatureDialog = false },
+            onSaveDrawn = { strokes, w, h, lw, colour -> viewModel.saveDrawnSignature(strokes, w, h, lw, colour) },
+            onImport = { viewModel.importSignature(it) },
+            onChoose = { viewModel.onEvent(ReaderEvent.ChooseSignature(it)) },
+            onForget = { viewModel.onEvent(ReaderEvent.ForgetSignature(it)) },
+        )
+    }
+
+    if (showExportDialog) {
+        ExportDialog(
+            isPro = state.isPro,
+            onDismiss = { showExportDialog = false },
+            onPick = { viewModel.onEvent(ReaderEvent.Export(it)) },
+        )
+    }
+
+    state.exportReady?.let { ready ->
+        ExportReadyDialog(
+            ready = ready,
+            onShare = {
+                shareFiles(context, ready.files, ready.format.mime)
+                viewModel.onEvent(ReaderEvent.ConsumeExport)
+            },
+            onSave = {
+                viewModel.onEvent(ReaderEvent.ConsumeExport)
+                val noSaver = { Toast.makeText(context, "No app available to save files", Toast.LENGTH_LONG).show() }
+                when {
+                    // One file: the normal "Save as" screen (Downloads, Drive, SD card…).
+                    ready.files.size == 1 -> {
+                        exportFileToSave = ready.files[0]
+                        runCatching { saveAsLaunchers.getValue(ready.format).launch(ready.files[0].name) }
+                            .onFailure { noSaver(); exportFileToSave = null }
+                    }
+                    // Several page pictures: straight into Pictures/Sheaf, no prompt (Android 10+).
+                    android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q ->
+                        viewModel.saveExportToPictures(ready.files)
+                    else -> {
+                        exportToSave = ready
+                        runCatching { folderLauncher.launch(null) }.onFailure { noSaver(); exportToSave = null }
+                    }
+                }
+            },
+            onDismiss = { viewModel.onEvent(ReaderEvent.ConsumeExport) },
+        )
+    }
+
+    state.textView?.let { tv ->
+        TextViewDialog(
+            title = state.displayName,
+            loading = tv.loading,
+            pages = tv.pages,
+            needsOcr = tv.needsOcr,
+            onClose = { viewModel.onEvent(ReaderEvent.CloseTextView) },
+            onUnlockOcr = {
+                viewModel.onEvent(ReaderEvent.CloseTextView)
+                viewModel.onEvent(ReaderEvent.ShowPaywall)
             },
         )
     }
@@ -629,46 +811,6 @@ fun ReaderScreen(
     editingNote?.let { ann ->
         NoteDialog(ann.note.orEmpty(), { editingNote = null }, { t -> viewModel.updateNote(ann, t); editingNote = null }, { viewModel.deleteAnnotation(ann.id); editingNote = null })
     }
-}
-
-@Composable
-private fun SignatureCaptureDialog(onDismiss: () -> Unit, onSave: (List<NormPoint>) -> Unit) {
-    val pts = remember { mutableStateListOf<NormPoint>() }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Draw your signature") },
-        text = {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(150.dp)
-                    .background(Color.White, RoundedCornerShape(8.dp)),
-            ) {
-                Canvas(
-                    Modifier.matchParentSize().pointerInput(Unit) {
-                        detectDragGestures(
-                            onDragStart = { o ->
-                                pts.clear()
-                                pts.add(NormPoint(o.x / size.width.toFloat(), o.y / size.height.toFloat()))
-                            },
-                            onDrag = { c, _ ->
-                                pts.add(NormPoint(c.position.x / size.width.toFloat(), c.position.y / size.height.toFloat()))
-                            },
-                        )
-                    },
-                ) {
-                    if (pts.size >= 2) {
-                        val path = Path()
-                        path.moveTo(pts[0].x * size.width, pts[0].y * size.height)
-                        for (i in 1 until pts.size) path.lineTo(pts[i].x * size.width, pts[i].y * size.height)
-                        drawPath(path, Color(0xFF15171C), style = Stroke(width = 4f, cap = StrokeCap.Round))
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = { onSave(pts.toList()) }) { Text("Save") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
 }
 
 private fun proLabel(text: String, isPro: Boolean): String = if (isPro) text else "$text  ·  PRO"
@@ -722,6 +864,8 @@ internal fun PaywallDialog(
                 Text("•  Reduce file size")
                 Text("•  Password protection")
                 Text("•  Merge PDFs")
+                Text("•  Export to Word and Excel")
+                Text("•  Copy text from scans")
                 Spacer(Modifier.height(8.dp))
                 Text(
                     if (price != null) "One-time purchase. No subscription, no ads."
@@ -1011,7 +1155,12 @@ private fun PageList(
     onTapNote: (Int, NormPoint) -> Unit,
     onEditNote: (Annotation) -> Unit,
     signatureMode: Boolean,
-    onStampSignature: (Int, NormPoint) -> Unit,
+    signatureImages: Map<String, android.graphics.Bitmap>,
+    selectedSignatureId: Long?,
+    onPlaceSignature: (Int, NormPoint, Float) -> Unit,
+    onUpdateSignature: (Annotation, SignaturePlacement) -> Unit,
+    onSelectSignature: (Long?) -> Unit,
+    onDeleteSignature: (Long) -> Unit,
     formMode: Boolean,
     formFieldsByPage: Map<Int, List<FormField>>,
     formValues: Map<String, String>,
@@ -1023,6 +1172,8 @@ private fun PageList(
     contentPadding: PaddingValues,
 ) {
     val pages = remember(pageCount) { (0 until pageCount).toList() }
+    // Decoded once for the whole list, not per page recomposition.
+    val signatureBitmaps = remember(signatureImages) { signatureImages.mapValues { it.value.asImageBitmap() } }
     val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
     val pageFilter = remember(theme, systemDark) { PageColors.pageFilter(theme, systemDark) }
     // Real layout zoom: pages are laid out zoom x wider than the viewport and the user pans
@@ -1107,7 +1258,12 @@ private fun PageList(
                         onTapNote = { pt -> onTapNote(index, pt) },
                         onEditNote = onEditNote,
                         signatureMode = signatureMode,
-                        onStampSignature = { pt -> onStampSignature(index, pt) },
+                        signatureImages = signatureBitmaps,
+                        selectedSignatureId = selectedSignatureId,
+                        onPlaceSignature = { pt, aspect -> onPlaceSignature(index, pt, aspect) },
+                        onUpdateSignature = onUpdateSignature,
+                        onSelectSignature = onSelectSignature,
+                        onDeleteSignature = onDeleteSignature,
                         formMode = formMode,
                         formFields = formFieldsByPage[index].orEmpty(),
                         formValues = formValues,
@@ -1136,7 +1292,12 @@ private fun PdfPageItem(
     onTapNote: (NormPoint) -> Unit,
     onEditNote: (Annotation) -> Unit,
     signatureMode: Boolean,
-    onStampSignature: (NormPoint) -> Unit,
+    signatureImages: Map<String, ImageBitmap>,
+    selectedSignatureId: Long?,
+    onPlaceSignature: (NormPoint, Float) -> Unit,
+    onUpdateSignature: (Annotation, SignaturePlacement) -> Unit,
+    onSelectSignature: (Long?) -> Unit,
+    onDeleteSignature: (Long) -> Unit,
     formMode: Boolean,
     formFields: List<FormField>,
     formValues: Map<String, String>,
@@ -1152,6 +1313,16 @@ private fun PdfPageItem(
     }
 
     val live = remember(pageIndex) { mutableStateListOf<Offset>() }
+    val placed = remember(savedStrokes) {
+        savedStrokes.mapNotNull { a -> SignaturePlacement.of(a)?.let { a to it } }
+    }
+    var liveSignature by remember(pageIndex) { mutableStateOf<LiveSignature?>(null) }
+    // The database caught up with a drag: show the saved placement again.
+    LaunchedEffect(savedStrokes) { liveSignature = null }
+    val currentPlaced by rememberUpdatedState(placed)
+    val currentSelected by rememberUpdatedState(selectedSignatureId)
+    val handleRadius = with(LocalDensity.current) { 13.dp.toPx() }
+    val accent = MaterialTheme.colorScheme.primary
     val pageLabel = "Page ${pageIndex + 1} of $pageCount"
 
     Box(
@@ -1174,11 +1345,16 @@ private fun PdfPageItem(
             Modifier.matchParentSize().clipToBounds().pointerInput(annotating, noteMode, signatureMode) {
                 if (!annotating) return@pointerInput
                 if (signatureMode) {
-                    detectTapGestures { pos ->
-                        val w = size.width.toFloat().coerceAtLeast(1f)
-                        val h = size.height.toFloat().coerceAtLeast(1f)
-                        onStampSignature(NormPoint(pos.x / w, pos.y / h))
-                    }
+                    signatureGestures(
+                        placements = { currentPlaced },
+                        selectedId = { currentSelected },
+                        handleRadius = handleRadius,
+                        onLive = { liveSignature = it },
+                        onPlace = onPlaceSignature,
+                        onSelect = onSelectSignature,
+                        onDelete = onDeleteSignature,
+                        onCommit = onUpdateSignature,
+                    )
                 } else if (noteMode) {
                     detectTapGestures { pos ->
                         val w = size.width.toFloat().coerceAtLeast(1f)
@@ -1217,10 +1393,19 @@ private fun PdfPageItem(
             },
         ) {
             savedStrokes.forEach { ann ->
+                if (ann.type == AnnotationType.Signature || ann.type == AnnotationType.Note) return@forEach
                 val base = Color(ann.colorArgb)
                 val c = if (ann.type == AnnotationType.Highlight) base.copy(alpha = 0.30f) else base
                 drawInk(ann.points, c, ann.strokeWidth)
             }
+            drawSignatures(
+                placed = placed,
+                images = signatureImages,
+                selectedId = if (annotating && signatureMode) selectedSignatureId else null,
+                live = liveSignature,
+                handleRadius = handleRadius,
+                accent = accent,
+            )
             if (live.size >= 2) {
                 val path = Path().apply {
                     moveTo(live[0].x, live[0].y)
@@ -1355,6 +1540,7 @@ private fun annotationLabel(ann: Annotation): String = when (ann.type) {
     AnnotationType.Underline -> "Underline"
     AnnotationType.Strikethrough -> "Strikethrough"
     AnnotationType.Ink -> "Ink"
+    AnnotationType.Signature -> "Signature"
 }
 
 private fun themeLabel(theme: ReaderTheme): String = when (theme) {

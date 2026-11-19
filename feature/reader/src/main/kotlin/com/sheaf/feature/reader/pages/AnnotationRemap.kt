@@ -2,6 +2,7 @@ package com.sheaf.feature.reader.pages
 
 import com.sheaf.core.domain.model.Annotation
 import com.sheaf.core.domain.model.NormPoint
+import com.sheaf.feature.reader.signature.SignaturePlacement
 
 /**
  * Carries a document's annotations over to an edited copy ("Manage pages" → Save copy): each kept
@@ -10,10 +11,21 @@ import com.sheaf.core.domain.model.NormPoint
  */
 object AnnotationRemap {
 
-    fun remap(annotations: List<Annotation>, items: List<PageItem>, newDocumentId: Long): List<Annotation> {
+    /** [aspectOf] = height / width of a source page, needed to turn signature boxes with their page. */
+    fun remap(
+        annotations: List<Annotation>,
+        items: List<PageItem>,
+        newDocumentId: Long,
+        aspectOf: (Int) -> Float = { 1.4142f },
+    ): List<Annotation> {
         val bySource = annotations.groupBy { it.pageIndex }
         return items.flatMapIndexed { newIndex, item ->
             bySource[item.sourceIndex].orEmpty().map { a ->
+                val signature = SignaturePlacement.of(a)
+                if (signature != null) {
+                    return@map SignaturePlacement.rotateWithPage(signature, item.rotation, aspectOf(item.sourceIndex))
+                        .toAnnotation(newDocumentId, newIndex, createdAt = a.createdAt)
+                }
                 a.copy(
                     id = 0,
                     documentId = newDocumentId,

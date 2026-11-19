@@ -1,6 +1,6 @@
 # Sheaf — Privacy Policy
 
-_Last updated: 18 November 2026_
+_Last updated: 19 November 2026_
 
 Sheaf is published by **Plentrix Ltd** (Ireland), the data controller for this app.
 
@@ -21,6 +21,15 @@ does not do with your information. **Sheaf is built to keep your documents on yo
   not require the camera permission itself and does not transmit captured images to us.
 - **Text recognition (OCR):** Performed **on-device** with Google's ML Kit. Recognized text is written
   into your PDF as a searchable layer and is not sent to us.
+- **Signatures:** Signatures you draw or photograph are saved as images in the app's private storage
+  on your device, excluded from cloud backup and device transfer. They are placed into a document only
+  where you put them, and leave your device only inside documents you choose to share or save.
+- **Photos and pictures:** Only pictures you select in Android's photo picker (or share to Sheaf) are
+  read, to turn them into PDFs or signatures. Sheaf has no access to the rest of your photos.
+- **Saving and exporting:** Copies, JPG, Word, Excel and text exports are written only where you choose
+  (Android's "Save" screen) or, for page pictures, to the Pictures/Sheaf album on your device.
+- **Translate:** Tapping Translate hands the selected text to the Google Translate app on your device.
+  Nothing is sent unless you tap it; Google Translate's own privacy policy then applies.
 - **Purchases (Sheaf Pro):** In-app purchases are handled by **Google Play Billing**. Google processes the
   transaction; Sheaf only stores a local flag indicating whether Pro is unlocked. We do not receive or
   store your payment details.

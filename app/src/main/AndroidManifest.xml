@@ -57,6 +57,13 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="application/pdf" />
             </intent-filter>
+            <!-- Receive a photo / picture shared TO Sheaf: it becomes a PDF to sign and share.
+                 Share-only (no VIEW), so Sheaf never offers itself as an image viewer. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
         </activity>
 
         <provider

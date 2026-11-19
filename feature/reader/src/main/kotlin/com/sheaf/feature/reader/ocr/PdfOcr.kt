@@ -4,4 +4,7 @@ package com.sheaf.feature.reader.ocr
 interface PdfOcr {
     /** Returns the output file path of a searchable copy, or null on failure. */
     suspend fun makeSearchable(uri: String): String?
+
+    /** Recognized text of every page (index = page), for copying and exporting scans. Null on failure. */
+    suspend fun recognizeText(uri: String, password: String? = null): List<String>? = null
 }

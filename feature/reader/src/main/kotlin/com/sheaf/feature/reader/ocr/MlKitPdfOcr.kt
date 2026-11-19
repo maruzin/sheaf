@@ -67,6 +67,38 @@ class MlKitPdfOcr @Inject constructor(
         }
     }
 
+    override suspend fun recognizeText(uri: String, password: String?): List<String>? = withContext(io) {
+        ensureInit()
+        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+        try {
+            context.contentResolver.openInputStream(uri.toUri())?.use { input ->
+                val doc = if (password != null) PDDocument.load(input, password, PdfBoxMemory.setting())
+                else PDDocument.load(input, PdfBoxMemory.setting())
+                doc.use {
+                    val renderer = PDFRenderer(doc)
+                    (0 until doc.numberOfPages).map { i ->
+                        ensureActive()
+                        val bitmap = renderer.renderImage(i, RENDER_SCALE)
+                        try {
+                            val result = Tasks.await(recognizer.process(InputImage.fromBitmap(bitmap, 0)))
+                            // Blocks top to bottom, lines in reading order: plain text a person can edit.
+                            result.textBlocks.joinToString("\n\n") { b -> b.lines.joinToString("\n") { it.text } }
+                        } finally {
+                            bitmap.recycle()
+                        }
+                    }
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            AppLog.e("OCR", "Recognizing text failed", e)
+            null
+        } finally {
+            recognizer.close()
+        }
+    }
+
     private fun ocrPage(
         doc: PDDocument,
         renderer: PDFRenderer,

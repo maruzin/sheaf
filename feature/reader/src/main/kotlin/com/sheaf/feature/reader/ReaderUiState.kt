@@ -1,9 +1,11 @@
 package com.sheaf.feature.reader
 
+import android.graphics.Bitmap
 import com.sheaf.core.domain.model.Annotation
+import com.sheaf.feature.reader.export.ExportFormat
+import java.io.File
 import com.sheaf.core.domain.model.FormField
 import com.sheaf.core.domain.model.OutlineEntry
-import com.sheaf.core.domain.model.NormPoint
 import com.sheaf.core.domain.model.SearchHit
 
 /** Immutable UI state for the reader screen (unidirectional data flow per Android Stack). */
@@ -41,8 +43,12 @@ data class ReaderUiState(
     val highlighter: Boolean = false,
     val noteMode: Boolean = false,
     val signatureMode: Boolean = false,
-    val hasSignature: Boolean = false,
-    val signaturePoints: List<NormPoint> = emptyList(),
+    // Signatures: saved images (newest first), the one new placements use, decoded images for drawing.
+    val savedSignatures: List<String> = emptyList(),
+    val activeSignature: String? = null,
+    val signatureImages: Map<String, Bitmap> = emptyMap(),
+    val selectedSignatureId: Long? = null,
+    val signatureBusy: Boolean = false,
     val annotationsListVisible: Boolean = false,
     val annotationsByPage: Map<Int, List<Annotation>> = emptyMap(),
     val canUndo: Boolean = false,
@@ -65,6 +71,12 @@ data class ReaderUiState(
     // Flatten annotations/signature into the PDF for sharing
     val flattening: Boolean = false,
     val flattenedPath: String? = null,
+    // Save a copy to the phone (system "Save" picker) and exports (JPG, TXT, Word, Excel)
+    val pendingSave: PendingSave? = null,
+    val exporting: Boolean = false,
+    val exportReady: ExportReady? = null,
+    // Extracted text, shown for copy / edit / translate
+    val textView: TextViewState? = null,
     // Freemium
     val isPro: Boolean = false,
     val showPaywall: Boolean = false,
@@ -76,6 +88,28 @@ data class ReaderUiState(
     // One-shot page the UI should scroll to (consumed via ConsumeScroll)
     val pendingScrollPage: Int? = null,
     val error: String? = null,
+) {
+    val hasSignature: Boolean get() = activeSignature != null
+
+    /** True when a form value differs from what the file holds. */
+    val formEdited: Boolean
+        get() = formFields.any { f -> (formValues[f.name] ?: f.value) != f.value }
+
+    /** Something the user added that the file doesn't contain yet (markup, signatures, form values). */
+    val hasChanges: Boolean get() = annotationsByPage.isNotEmpty() || formEdited
+}
+
+/** A file ready for the system "Save" picker. [temp] files are deleted once written. */
+data class PendingSave(val source: String, val suggestedName: String, val mime: String, val temp: Boolean)
+
+/** Exported files, waiting for the user to share them or save them to the phone. */
+data class ExportReady(val files: List<File>, val format: ExportFormat)
+
+data class TextViewState(
+    val loading: Boolean = true,
+    val pages: List<String> = emptyList(),
+    /** The document is a scan and its text needs OCR (a Pro feature) first. */
+    val needsOcr: Boolean = false,
 )
 
 enum class ReaderTheme { System, Light, Dark, Sepia }
@@ -100,6 +134,16 @@ sealed interface ReaderEvent {
     data class SetHighlighter(val on: Boolean) : ReaderEvent
     data class SetNoteMode(val on: Boolean) : ReaderEvent
     data class SetSignatureMode(val on: Boolean) : ReaderEvent
+    data object StartSigning : ReaderEvent
+    data class SelectSignature(val id: Long?) : ReaderEvent
+    data class ChooseSignature(val name: String) : ReaderEvent
+    data class ForgetSignature(val name: String) : ReaderEvent
+    data object SaveToPhone : ReaderEvent
+    data object ConsumeSave : ReaderEvent
+    data class Export(val format: ExportFormat) : ReaderEvent
+    data object ConsumeExport : ReaderEvent
+    data object OpenTextView : ReaderEvent
+    data object CloseTextView : ReaderEvent
     data object ToggleFormMode : ReaderEvent
     data class SetFormValue(val name: String, val value: String) : ReaderEvent
     data object SaveForm : ReaderEvent

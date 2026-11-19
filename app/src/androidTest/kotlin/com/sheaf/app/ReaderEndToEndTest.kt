@@ -20,6 +20,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipe
+import androidx.compose.ui.test.click
 import androidx.compose.ui.geometry.Offset
 import androidx.core.content.FileProvider
 import org.junit.Assert.assertEquals
@@ -64,7 +65,7 @@ class ReaderEndToEndTest {
         // After Back we land on onboarding (fresh install) or the library: wait for either.
         compose.waitUntil(timeout) {
             compose.onAllNodesWithText("Get started").fetchSemanticsNodes().isNotEmpty() ||
-                compose.onAllNodesWithContentDescription("Open PDF").fetchSemanticsNodes().isNotEmpty()
+                compose.onAllNodesWithContentDescription("Open file").fetchSemanticsNodes().isNotEmpty()
         }
         if (compose.onAllNodesWithText("Get started").fetchSemanticsNodes().isNotEmpty()) {
             compose.onNodeWithText("Get started").performClick()
@@ -163,7 +164,7 @@ class ReaderEndToEndTest {
             waitForDescription("Page 1 of 1")
             compose.onNodeWithContentDescription("Back").performClick()
             skipOnboardingIfShown()
-            waitForDescription("Open PDF")
+            waitForDescription("Open file")
             compose.onAllNodesWithText(pdf.name).fetchSemanticsNodes().let { check(it.isNotEmpty()) }
             compose.onNodeWithContentDescription("More options for ${pdf.name}", useUnmergedTree = true)
                 .performClick()
@@ -205,13 +206,60 @@ class ReaderEndToEndTest {
     }
 
     @Test
+    fun signWithADrawnMultiStrokeSignatureThenMoveIt() {
+        val pdf = TestPdfs.plain(context, "e2e-sign-${System.nanoTime()}.pdf", pages = 1)
+        launchWith(pdf).use {
+            waitForDescription("Page 1 of 1")
+            compose.onNodeWithContentDescription("Sign document").performClick()
+            // A device that already has a saved signature goes straight to signing: ask for a new one.
+            compose.waitUntil(timeout) {
+                compose.onAllNodesWithText("Your signature").fetchSemanticsNodes().isNotEmpty() ||
+                    compose.onAllNodesWithText("New").fetchSemanticsNodes().isNotEmpty()
+            }
+            if (compose.onAllNodesWithText("Your signature").fetchSemanticsNodes().isEmpty()) {
+                compose.onNodeWithText("New").performClick()
+                waitForText("Your signature")
+            }
+            compose.onNodeWithText("Draw").performClick()
+            val pad = "Signature pad. Draw your signature with your finger."
+            waitForDescription(pad)
+            compose.onNodeWithText("Save signature").assertIsNotEnabled()
+            // Two separate strokes: both must survive (the old pad kept only the last one).
+            compose.onNodeWithContentDescription(pad).performTouchInput {
+                swipe(Offset(width * 0.1f, height * 0.6f), Offset(width * 0.45f, height * 0.4f), 300)
+            }
+            compose.onNodeWithContentDescription(pad).performTouchInput {
+                swipe(Offset(width * 0.55f, height * 0.5f), Offset(width * 0.9f, height * 0.55f), 300)
+            }
+            compose.onNodeWithText("Undo").assertIsEnabled()
+            compose.onNodeWithText("Save signature").performClick()
+
+            // Signing mode: tap the page to place it, then drag it somewhere else.
+            waitForText("Tap the page to place your signature", substring = true)
+            compose.onNodeWithContentDescription("Page 1 of 1").performTouchInput { click(center) }
+            compose.waitUntil(timeout) {
+                runCatching { compose.onNodeWithContentDescription("Undo").assertIsEnabled() }.isSuccess
+            }
+            compose.onNodeWithContentDescription("Page 1 of 1").performTouchInput {
+                swipe(center, Offset(width * 0.3f, height * 0.8f), 400)
+            }
+            compose.onNodeWithText("Done").performClick()
+
+            // The signature is a real annotation on the page.
+            waitForDescription("Annotations")
+            compose.onNodeWithContentDescription("Annotations").performClick()
+            waitForText("Signature")
+        }
+    }
+
+    @Test
     fun mergeIsProAndShowsThePaywallWithRestore() {
         val pdf = TestPdfs.plain(context, "e2e-merge.pdf", pages = 1)
         launchWith(pdf).use {
             waitForDescription("Page 1 of 1")
             compose.onNodeWithContentDescription("Back").performClick()
             skipOnboardingIfShown()
-            waitForDescription("Open PDF")
+            waitForDescription("Open file")
             compose.onNodeWithContentDescription("More options").performClick()
             compose.onNodeWithText("Merge PDFs", substring = true).performClick()
             waitForText("Sheaf Pro")
