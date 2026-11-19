@@ -197,4 +197,20 @@ class SigningAndExportEngineTest {
         store.sweep(keep = setOf("sig_1_1.png"), now = Long.MAX_VALUE)
         assertTrue(!fresh.exists())
     }
+
+    @Test
+    fun `stamps render as ink on a transparent background`() = runTest {
+        val tick = store.saveStamp(SignatureStore.Stamp.Tick)!!
+        val tickBmp = store.load(tick)!!
+        assertEquals(tickBmp.width, tickBmp.height)
+        val px = IntArray(tickBmp.width * tickBmp.height).also { tickBmp.getPixels(it, 0, tickBmp.width, 0, 0, tickBmp.width, tickBmp.height) }
+        assertTrue("tick has ink", px.count { (it ushr 24) > 200 } > 500)
+        assertTrue("background is transparent", (px[0] ushr 24) == 0)
+
+        val date = store.saveStamp(SignatureStore.Stamp.Date, "19/11/2026")!!
+        val dateBmp = store.load(date)!!
+        assertTrue("text stamp is wide", dateBmp.width > dateBmp.height * 3)
+
+        assertEquals(null, store.saveStamp(SignatureStore.Stamp.Text, "   "))
+    }
 }

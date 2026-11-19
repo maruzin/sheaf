@@ -46,6 +46,17 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlin.math.roundToInt
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,18 +75,42 @@ fun PagesScreen(
         modifier = modifier,
         topBar = {
             TopAppBar(
-                title = { Text("Manage pages") },
+                title = {
+                    Text(
+                        if (state.selecting) "${state.selected.size} selected" else "Manage pages",
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                    )
+                },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    if (state.selecting) {
+                        IconButton(onClick = { viewModel.setSelecting(false) }) {
+                            Icon(Icons.Filled.Close, contentDescription = "Stop selecting")
+                        }
+                    } else {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
                     }
                 },
                 actions = {
-                    if (state.saving) {
-                        CircularProgressIndicator(Modifier.size(22.dp).padding(end = 12.dp))
-                    } else {
-                        TextButton(onClick = { viewModel.save() }, enabled = state.items.isNotEmpty()) {
-                            Text("Save copy")
+                    when {
+                        state.saving -> CircularProgressIndicator(Modifier.size(22.dp).padding(end = 12.dp))
+                        state.selecting -> {
+                            TextButton(onClick = { viewModel.selectAll() }) {
+                                Text(if (state.selected.size == state.items.size) "Clear" else "All")
+                            }
+                            Button(onClick = { viewModel.extract() }, enabled = state.selected.isNotEmpty()) {
+                                Text("Extract")
+                            }
+                        }
+                        else -> {
+                            // Extract: pick pages and save just those as a new PDF.
+                            TextButton(onClick = { viewModel.setSelecting(true) }, enabled = state.items.isNotEmpty()) {
+                                Text("Select")
+                            }
+                            TextButton(onClick = { viewModel.save() }, enabled = state.items.isNotEmpty()) {
+                                Text("Save copy")
+                            }
                         }
                     }
                 },
@@ -108,6 +143,9 @@ fun PagesScreen(
                             onDelete = { viewModel.delete(index) },
                             onLeft = { viewModel.move(index, -1) },
                             onRight = { viewModel.move(index, 1) },
+                            selecting = state.selecting,
+                            selected = item.sourceIndex in state.selected,
+                            onToggle = { viewModel.toggleSelected(item.sourceIndex) },
                         )
                     }
                 }
@@ -127,15 +165,30 @@ private fun PageCard(
     onDelete: () -> Unit,
     onLeft: () -> Unit,
     onRight: () -> Unit,
+    selecting: Boolean = false,
+    selected: Boolean = false,
+    onToggle: () -> Unit = {},
 ) {
     var bitmap by remember(item.sourceIndex) { mutableStateOf<Bitmap?>(null) }
     LaunchedEffect(item.sourceIndex) {
         bitmap = renderThumb(240, (240 * aspect).roundToInt().coerceIn(1, 2000))
     }
+    val shape = RoundedCornerShape(8.dp)
     Column(
         Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant, shape)
+            .then(
+                if (selecting) {
+                    Modifier
+                        .border(if (selected) 3.dp else 0.dp, MaterialTheme.colorScheme.primary, shape)
+                        // The whole card is one checkbox in select mode.
+                        .toggleable(value = selected, role = Role.Checkbox, onValueChange = { onToggle() })
+                        .semantics { contentDescription = "Page $number" }
+                } else {
+                    Modifier
+                },
+            )
             .padding(6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -156,6 +209,13 @@ private fun PageCard(
             style = MaterialTheme.typography.labelMedium,
             modifier = Modifier.padding(top = 4.dp),
         )
+        if (selecting) {
+            Row(Modifier.heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = selected, onCheckedChange = null)
+                Text(if (selected) "Selected" else "Tap to select", style = MaterialTheme.typography.labelMedium)
+            }
+            return@Column
+        }
         // Two rows of two: four 48dp touch targets don't fit the 140dp-min grid cell in one row.
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onLeft, enabled = number > 1) {

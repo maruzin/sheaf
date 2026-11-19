@@ -74,6 +74,8 @@ import com.sheaf.feature.reader.signature.LiveSignature
 import com.sheaf.feature.reader.signature.SignatureBar
 import com.sheaf.feature.reader.signature.SignatureDialog
 import com.sheaf.feature.reader.signature.SignaturePlacement
+import com.sheaf.feature.reader.signature.SignatureStore
+import com.sheaf.feature.reader.signature.StampTextDialog
 import com.sheaf.feature.reader.signature.drawSignatures
 import com.sheaf.feature.reader.signature.signatureGestures
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -256,6 +258,8 @@ fun ReaderScreen(
     var showProtect by remember { mutableStateOf(false) }
     // Saveable: the dialog (and its camera / gallery launchers) must survive a rotation mid-capture.
     var showSignatureDialog by rememberSaveable { mutableStateOf(false) }
+    var showStampText by rememberSaveable { mutableStateOf(false) }
+    var stampText by rememberSaveable { mutableStateOf("") }
     var showExportDialog by remember { mutableStateOf(false) }
     // The picker result arrives after the state was consumed: hold the request here meanwhile.
     // Saveable, so rotating the phone (or the system killing Sheaf) inside the picker doesn't lose
@@ -531,6 +535,11 @@ fun ReaderScreen(
                         onPlaceHere = viewModel::placeSignatureOnCurrentPage,
                         onNudge = viewModel::nudgeSelectedSignature,
                         onRemove = viewModel::removeSelectedSignature,
+                        activeStamp = state.activeStamp,
+                        onStamp = { kind ->
+                            if (kind == SignatureStore.Stamp.Text) showStampText = true
+                            else viewModel.makeStamp(kind)
+                        },
                     )
                 } else if (state.annotating) {
                     InkToolbar(
@@ -578,8 +587,10 @@ fun ReaderScreen(
                     text = { Text("Sign") },
                     icon = { Icon(Icons.Filled.Gesture, contentDescription = null) },
                     onClick = {
-                        if (state.hasSignature) viewModel.onEvent(ReaderEvent.StartSigning)
-                        else showSignatureDialog = true
+                        // Always enter signing (the bar has the stamps); with no signature yet, also
+                        // offer to make one. Cancelling still leaves date / tick / cross / text ready.
+                        viewModel.onEvent(ReaderEvent.StartSigning)
+                        if (!state.hasSignature) showSignatureDialog = true
                     },
                     modifier = Modifier.semantics { contentDescription = "Sign document" },
                 )
@@ -629,6 +640,7 @@ fun ReaderScreen(
                     signatureMode = state.signatureMode,
                     signatureImages = state.signatureImages,
                     selectedSignatureId = state.selectedSignatureId,
+                    stamping = state.activeStamp != null,
                     onPlaceSignature = { page, pt, aspect -> viewModel.placeSignature(page, pt, aspect) },
                     onUpdateSignature = { ann, placement -> viewModel.updateSignature(ann, placement) },
                     onSelectSignature = { viewModel.onEvent(ReaderEvent.SelectSignature(it)) },
@@ -765,6 +777,18 @@ fun ReaderScreen(
             onImport = { viewModel.importSignature(it) },
             onChoose = { viewModel.onEvent(ReaderEvent.ChooseSignature(it)) },
             onForget = { viewModel.onEvent(ReaderEvent.ForgetSignature(it)) },
+        )
+    }
+
+    if (showStampText) {
+        StampTextDialog(
+            initial = stampText,
+            onDismiss = { showStampText = false },
+            onStamp = { text ->
+                stampText = text
+                showStampText = false
+                viewModel.makeStamp(SignatureStore.Stamp.Text, text)
+            },
         )
     }
 
@@ -1191,6 +1215,7 @@ private fun PageList(
     signatureMode: Boolean,
     signatureImages: Map<String, android.graphics.Bitmap>,
     selectedSignatureId: Long?,
+    stamping: Boolean = false,
     onPlaceSignature: (Int, NormPoint, Float) -> Unit,
     onUpdateSignature: (Annotation, SignaturePlacement) -> Unit,
     onSelectSignature: (Long?) -> Unit,
@@ -1294,6 +1319,7 @@ private fun PageList(
                         signatureMode = signatureMode,
                         signatureImages = signatureBitmaps,
                         selectedSignatureId = selectedSignatureId,
+                        stamping = stamping,
                         onPlaceSignature = { pt, aspect -> onPlaceSignature(index, pt, aspect) },
                         onUpdateSignature = onUpdateSignature,
                         onSelectSignature = onSelectSignature,
@@ -1328,6 +1354,7 @@ private fun PdfPageItem(
     signatureMode: Boolean,
     signatureImages: Map<String, ImageBitmap>,
     selectedSignatureId: Long?,
+    stamping: Boolean = false,
     onPlaceSignature: (NormPoint, Float) -> Unit,
     onUpdateSignature: (Annotation, SignaturePlacement) -> Unit,
     onSelectSignature: (Long?) -> Unit,
@@ -1365,6 +1392,7 @@ private fun PdfPageItem(
     }
     val currentPlaced by rememberUpdatedState(shownPlaced)
     val currentSelected by rememberUpdatedState(selectedSignatureId)
+    val currentStamping by rememberUpdatedState(stamping)
     val handleRadius = with(LocalDensity.current) { 13.dp.toPx() }
     val pageLabel = "Page ${pageIndex + 1} of $pageCount"
 
@@ -1397,6 +1425,7 @@ private fun PdfPageItem(
                         onSelect = onSelectSignature,
                         onDelete = onDeleteSignature,
                         onCommit = onUpdateSignature,
+                        placeOnEveryTap = { currentStamping },
                     )
                 } else if (noteMode) {
                     detectTapGestures { pos ->

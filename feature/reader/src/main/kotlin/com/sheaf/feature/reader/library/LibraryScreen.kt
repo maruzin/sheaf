@@ -434,7 +434,7 @@ private fun DocumentRow(
             Text(doc.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis)
         },
         supportingContent = {
-            val pages = if (doc.pageCount > 0) "${doc.pageCount} pages" else "Password protected"
+            val pages = if (doc.pageCount > 0) if (doc.pageCount == 1) "1 page" else "${doc.pageCount} pages" else "Password protected"
             Text("$pages · ${formatSize(doc.sizeBytes)}")
         },
         trailingContent = {

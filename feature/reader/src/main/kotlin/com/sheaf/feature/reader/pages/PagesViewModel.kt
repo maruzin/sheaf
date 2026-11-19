@@ -73,12 +73,41 @@ class PagesViewModel @Inject constructor(
     fun move(position: Int, delta: Int) =
         _state.update { it.copy(items = PageReducer.move(it.items, position, delta)) }
 
+    fun setSelecting(on: Boolean) = _state.update { it.copy(selecting = on, selected = emptySet()) }
+
+    fun toggleSelected(sourceIndex: Int) = _state.update {
+        it.copy(selected = if (sourceIndex in it.selected) it.selected - sourceIndex else it.selected + sourceIndex)
+    }
+
+    fun selectAll() = _state.update {
+        it.copy(selected = if (it.selected.size == it.items.size) emptySet() else it.items.map { p -> p.sourceIndex }.toSet())
+    }
+
+    /** Saves the arrangement as an edited copy ("Save copy"). */
     fun save() {
         val s = _state.value
-        if (s.uri.isBlank() || s.items.isEmpty()) return
+        if (s.items.isEmpty()) return
+        writeCopy(s.items, "edited")
+    }
+
+    /**
+     * Saves only the ticked pages, in their current order and rotation, as a new PDF in the library
+     * ("Lease (pages 2-4).pdf"); markup on those pages comes along.
+     */
+    fun extract() {
+        val s = _state.value
+        val picked = s.items.filter { it.sourceIndex in s.selected }
+        if (picked.isEmpty()) return
+        val positions = s.items.mapIndexedNotNull { i, item -> if (item.sourceIndex in s.selected) i + 1 else null }
+        writeCopy(picked, PageRanges.label(positions))
+    }
+
+    private fun writeCopy(items: List<PageItem>, suffix: String) {
+        val s = _state.value
+        if (s.uri.isBlank() || items.isEmpty() || s.saving) return
         viewModelScope.launch {
             _state.update { it.copy(saving = true) }
-            val plan = s.items.map { PageOp(it.sourceIndex, it.rotation) }
+            val plan = items.map { PageOp(it.sourceIndex, it.rotation) }
             val path = runCatching { editor.save(s.uri, plan) }.getOrNull()
             if (path == null) {
                 _state.update { it.copy(saving = false, error = "Couldn't save the edited PDF") }
@@ -90,9 +119,9 @@ class PagesViewModel @Inject constructor(
                     Document(
                         id = 0,
                         uri = fileUri,
-                        displayName = s.displayName.substringBeforeLast(".").ifBlank { "Document" } + " (edited).pdf",
+                        displayName = s.displayName.substringBeforeLast(".").ifBlank { "Document" } + " ($suffix).pdf",
                         sizeBytes = File(path).length(),
-                        pageCount = s.items.size,
+                        pageCount = items.size,
                         lastOpenedAt = System.currentTimeMillis(),
                         addedAt = System.currentTimeMillis(),
                     ),
@@ -103,14 +132,16 @@ class PagesViewModel @Inject constructor(
             if (newId != null && sourceId != null) {
                 runCatching {
                     val existing = annotations.observeForDocument(sourceId).first()
-                    AnnotationRemap.remap(existing, s.items, newId, ::aspectRatio).forEach { annotations.upsert(it) }
+                    AnnotationRemap.remap(existing, items, newId, ::aspectRatio).forEach { annotations.upsert(it) }
                 }
             }
             _state.update {
                 it.copy(
                     saving = false,
                     savedDocumentId = newId,
-                    error = if (newId == null) "Couldn't add the edited PDF to your library" else it.error,
+                    selecting = false,
+                    selected = emptySet(),
+                    error = if (newId == null) "Couldn't add the new PDF to your library" else it.error,
                 )
             }
         }

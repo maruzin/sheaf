@@ -33,6 +33,7 @@ SIGN ANY DOCUMENT
 • Draw your signature with your finger, or photograph it on paper: Sheaf removes the paper and keeps only your ink
 • Save several signatures (full signature and initials) and reuse them in a tap
 • Place it anywhere, then drag to move, resize or turn it to fit the line
+• Fill-and-sign stamps: today's date, a tick, a cross or your own text, placed in one tap
 • Sign PDFs, photos and pictures: any image becomes a PDF you can sign
 • Share the signed copy straight to email, WhatsApp or Drive, or save it to your phone
 
@@ -47,6 +48,7 @@ FILL PDF FORMS
 
 ORGANISE PAGES
 • Rotate, delete and reorder pages
+• Extract pages: save just the pages you pick as a new PDF
 • Save the result as a new PDF
 
 SCAN TO PDF

@@ -18,6 +18,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipe
 import androidx.compose.ui.test.click
@@ -257,6 +258,9 @@ class ReaderEndToEndTest {
             // The same adjustments without dragging (TalkBack / Switch Access path): select, then buttons.
             compose.onNodeWithContentDescription("Page 1 of 1").performTouchInput { click(Offset(width * 0.3f, height * 0.8f)) }
             waitForDescription("Move signature left")
+            compose.waitUntil(timeout) {
+                runCatching { compose.onNodeWithContentDescription("Move signature left").assertIsEnabled() }.isSuccess
+            }
             compose.onNodeWithContentDescription("Move signature left").performClick()
             compose.onNodeWithContentDescription("Make signature bigger").performClick()
             compose.onNodeWithContentDescription("Turn signature right").performClick()
@@ -266,6 +270,59 @@ class ReaderEndToEndTest {
             waitForDescription("Annotations")
             compose.onNodeWithContentDescription("Annotations").performClick()
             waitForText("Signature")
+        }
+    }
+
+    @Test
+    fun tickAndDateStampsArePlacedLikeSignatures() {
+        val pdf = TestPdfs.plain(context, "e2e-stamp-${System.nanoTime()}.pdf", pages = 1)
+        launchWith(pdf).use {
+            waitForDescription("Page 1 of 1")
+            compose.onNodeWithContentDescription("Sign document").performClick()
+            // No saved signature yet opens the signature dialog; stamps don't need one.
+            compose.waitUntil(timeout) {
+                compose.onAllNodesWithText("Your signature").fetchSemanticsNodes().isNotEmpty() ||
+                    compose.onAllNodesWithContentDescription("Tick stamp").fetchSemanticsNodes().isNotEmpty()
+            }
+            if (compose.onAllNodesWithText("Cancel").fetchSemanticsNodes().isNotEmpty()) {
+                compose.onAllNodesWithText("Cancel")[0].performClick()
+            }
+            waitForDescription("Tick stamp")
+            compose.onNodeWithContentDescription("Tick stamp").performClick()
+            waitForText("Tap each place the tick goes", substring = true)
+            compose.onNodeWithContentDescription("Page 1 of 1").performTouchInput { click(Offset(width * 0.2f, height * 0.3f)) }
+            waitForText("Stamp selected", substring = true)
+            // Stamping: a second tap on empty page adds another tick (it doesn't just deselect).
+            compose.onNodeWithContentDescription("Page 1 of 1").performTouchInput { click(Offset(width * 0.2f, height * 0.5f)) }
+            compose.onNodeWithContentDescription("Date stamp").performScrollTo().performClick()
+            waitForText("Tap each place the date goes", substring = true)
+            compose.onNodeWithText("Place on this page").performScrollTo().performClick()
+            waitForText("Stamp selected", substring = true)
+            compose.onNodeWithText("Done").performClick()
+            waitForDescription("Annotations")
+            compose.onNodeWithContentDescription("Annotations").performClick()
+            // Two ticks and a date.
+            compose.waitUntil(timeout) { compose.onAllNodesWithText("Signature").fetchSemanticsNodes().size >= 3 }
+        }
+    }
+
+    @Test
+    fun extractSelectedPagesIntoANewPdf() {
+        val pdf = TestPdfs.plain(context, "e2e-extract-${System.nanoTime()}.pdf", pages = 3)
+        launchWith(pdf).use {
+            waitForDescription("Page 1 of 3")
+            compose.onNodeWithContentDescription("More").performClick()
+            compose.onNodeWithText("Manage pages").performClick()
+            waitForText("Select")
+            compose.onNodeWithText("Select").performClick()
+            waitForText("0 selected")
+            compose.onNodeWithContentDescription("Page 2").performClick()
+            compose.onNodeWithContentDescription("Page 3").performClick()
+            waitForText("2 selected")
+            compose.onNodeWithText("Extract").performClick()
+            // The new two-page PDF opens in the reader.
+            waitForText("(pages 2-3)", substring = true)
+            waitForDescription("Page 1 of 2")
         }
     }
 

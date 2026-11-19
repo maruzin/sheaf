@@ -112,6 +112,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.material.icons.filled.CalendarToday
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.OutlinedTextField
 
 private val INK_COLOURS = listOf(0xFF15171C.toInt() to "Black", 0xFF1F3FA8.toInt() to "Blue")
 
@@ -439,6 +444,8 @@ internal fun SignatureBar(
     onPlaceHere: () -> Unit = {},
     onNudge: (SignatureGestures.Nudge) -> Unit = {},
     onRemove: () -> Unit = {},
+    activeStamp: String? = null,
+    onStamp: (SignatureStore.Stamp) -> Unit = {},
 ) {
     Column(Modifier.fillMaxWidth()) {
         Row(
@@ -473,30 +480,52 @@ internal fun SignatureBar(
             Button(onClick = onDone) { Text("Done") }
         }
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 16.dp))
-        // Every drag on the page has a button here too: for TalkBack and Switch Access users, and for
-        // anyone who finds small, precise drags hard.
+        // Stamps: always on their own row, so they're never pushed off screen by the adjust buttons.
         Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (hasSelection) {
-                NudgeButton(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Move signature left") { onNudge(SignatureGestures.Nudge.Left) }
-                NudgeButton(Icons.Filled.KeyboardArrowUp, "Move signature up") { onNudge(SignatureGestures.Nudge.Up) }
-                NudgeButton(Icons.Filled.KeyboardArrowDown, "Move signature down") { onNudge(SignatureGestures.Nudge.Down) }
-                NudgeButton(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Move signature right") { onNudge(SignatureGestures.Nudge.Right) }
-                NudgeButton(Icons.Filled.ZoomOut, "Make signature smaller") { onNudge(SignatureGestures.Nudge.Smaller) }
-                NudgeButton(Icons.Filled.ZoomIn, "Make signature bigger") { onNudge(SignatureGestures.Nudge.Bigger) }
-                NudgeButton(Icons.AutoMirrored.Filled.RotateLeft, "Turn signature left") { onNudge(SignatureGestures.Nudge.TurnLeft) }
-                NudgeButton(Icons.AutoMirrored.Filled.RotateRight, "Turn signature right") { onNudge(SignatureGestures.Nudge.TurnRight) }
-                NudgeButton(Icons.Filled.Delete, "Remove signature", onClick = onRemove)
-            } else if (active != null) {
-                TextButton(onClick = onPlaceHere) { Text("Place on this page") }
+            val marks = setOf("Date", "Tick", "Cross")
+            StampChip("Date", activeStamp == "Date", { Icon(Icons.Filled.CalendarToday, null, Modifier.size(18.dp)) }) {
+                onStamp(SignatureStore.Stamp.Date)
+            }
+            StampChip("Tick", activeStamp == "Tick", { Icon(Icons.Filled.Check, null, Modifier.size(18.dp)) }) {
+                onStamp(SignatureStore.Stamp.Tick)
+            }
+            StampChip("Cross", activeStamp == "Cross", { Icon(Icons.Filled.Close, null, Modifier.size(18.dp)) }) {
+                onStamp(SignatureStore.Stamp.Cross)
+            }
+            StampChip("Text", activeStamp != null && activeStamp !in marks, { Icon(Icons.Filled.TextFields, null, Modifier.size(18.dp)) }) {
+                onStamp(SignatureStore.Stamp.Text)
+            }
+            if (active != null && !hasSelection) TextButton(onClick = onPlaceHere) { Text("Place on this page") }
+        }
+        // Every drag on the page has a button here too: for TalkBack and Switch Access users, and for
+        // anyone who finds small, precise drags hard. Always shown (disabled until something is
+        // selected) so the bar never changes height and the page never jumps under the finger.
+        run {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val what = if (activeStamp != null) "stamp" else "signature"
+                NudgeButton(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Move $what left", enabled = hasSelection) { onNudge(SignatureGestures.Nudge.Left) }
+                NudgeButton(Icons.Filled.KeyboardArrowUp, "Move $what up", enabled = hasSelection) { onNudge(SignatureGestures.Nudge.Up) }
+                NudgeButton(Icons.Filled.KeyboardArrowDown, "Move $what down", enabled = hasSelection) { onNudge(SignatureGestures.Nudge.Down) }
+                NudgeButton(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Move $what right", enabled = hasSelection) { onNudge(SignatureGestures.Nudge.Right) }
+                NudgeButton(Icons.Filled.ZoomOut, "Make $what smaller", enabled = hasSelection) { onNudge(SignatureGestures.Nudge.Smaller) }
+                NudgeButton(Icons.Filled.ZoomIn, "Make $what bigger", enabled = hasSelection) { onNudge(SignatureGestures.Nudge.Bigger) }
+                NudgeButton(Icons.AutoMirrored.Filled.RotateLeft, "Turn $what left", enabled = hasSelection) { onNudge(SignatureGestures.Nudge.TurnLeft) }
+                NudgeButton(Icons.AutoMirrored.Filled.RotateRight, "Turn $what right", enabled = hasSelection) { onNudge(SignatureGestures.Nudge.TurnRight) }
+                NudgeButton(Icons.Filled.Delete, "Remove $what", enabled = hasSelection, onClick = onRemove)
             }
         }
         Text(
             when {
-                active == null -> "Create your signature to start."
+                hasSelection && activeStamp != null -> "Stamp selected. Adjust it, or tap the page to add another."
                 hasSelection -> "Signature selected. Drag it or use the buttons to move, resize or turn it."
+                activeStamp != null -> "Tap each place the ${if (activeStamp in setOf("Date", "Tick", "Cross")) activeStamp.lowercase() else "text"} goes, or use Place on this page."
+                active == null -> "Create your signature, or add a date, tick, cross or text."
                 else -> "Tap the page where the signature goes, or use Place on this page."
             },
             style = MaterialTheme.typography.labelSmall,
@@ -508,9 +537,47 @@ internal fun SignatureBar(
     }
 }
 
+/** Text for a stamp: a name, "N/A", a reference number, a job title. */
 @Composable
-private fun NudgeButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
-    IconButton(onClick = onClick) { Icon(icon, contentDescription = label) }
+internal fun StampTextDialog(initial: String, onDismiss: () -> Unit, onStamp: (String) -> Unit) {
+    var text by rememberSaveable { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Text stamp") },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it.take(SignatureStore.MAX_STAMP_CHARS) },
+                singleLine = true,
+                label = { Text("Text to place") },
+                placeholder = { Text("Your name, N/A, a reference…") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = { Button(onClick = { onStamp(text) }, enabled = text.isNotBlank()) { Text("Place text") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun StampChip(label: String, selected: Boolean, icon: @Composable () -> Unit, onClick: () -> Unit) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label) },
+        leadingIcon = icon,
+        modifier = Modifier.padding(horizontal = 3.dp).semantics { contentDescription = "$label stamp" },
+    )
+}
+
+@Composable
+private fun NudgeButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    IconButton(onClick = onClick, enabled = enabled) { Icon(icon, contentDescription = label) }
 }
 
 /** A drag in progress: the placement shown for annotation [id] until the database catches up. */
@@ -617,6 +684,8 @@ internal suspend fun PointerInputScope.signatureGestures(
     onSelect: (Long?) -> Unit,
     onDelete: (Long) -> Unit,
     onCommit: (Annotation, SignaturePlacement) -> Unit,
+    /** Stamping: a tap on empty page always places another stamp, even while one is selected. */
+    placeOnEveryTap: () -> Boolean = { false },
 ) {
     awaitEachGesture {
         val down = awaitFirstDown(requireUnconsumed = false)
@@ -677,7 +746,7 @@ internal suspend fun PointerInputScope.signatureGestures(
                 SignatureGestures.Part.Delete -> onDelete(hit.id)
                 SignatureGestures.Part.Body -> onSelect(hit.id)
                 SignatureGestures.Part.Resize, SignatureGestures.Part.Rotate -> Unit
-                null -> if (selectedHere != null) onSelect(null)
+                null -> if (selectedHere != null && !placeOnEveryTap()) onSelect(null)
                 else onPlace(NormPoint(down.position.x / w, down.position.y / h), h / w)
             }
         }

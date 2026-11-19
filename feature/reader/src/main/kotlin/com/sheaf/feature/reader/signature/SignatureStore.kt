@@ -138,6 +138,56 @@ class SignatureStore @Inject constructor(
         deleted
     }
 
+    /** Fill-and-sign stamps: placed and exported exactly like a signature image. */
+    enum class Stamp { Date, Tick, Cross, Text }
+
+    /**
+     * Renders a stamp as a transparent PNG in signature ink: [text] for [Stamp.Text] and [Stamp.Date]
+     * (the caller formats the date), drawn paths for a tick or cross (fonts may lack the glyphs).
+     * Null on failure or blank text.
+     */
+    suspend fun saveStamp(kind: Stamp, text: String = ""): String? = withContext(io) {
+        runCatching {
+            val ink = 0xFF15171C.toInt()
+            val bmp = when (kind) {
+                Stamp.Tick, Stamp.Cross -> {
+                    val size = 200
+                    createBitmap(size, size).also { b ->
+                        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                            color = ink
+                            style = Paint.Style.STROKE
+                            strokeWidth = 24f
+                            strokeCap = Paint.Cap.ROUND
+                            strokeJoin = Paint.Join.ROUND
+                        }
+                        val c = Canvas(b)
+                        if (kind == Stamp.Tick) {
+                            c.drawPath(Path().apply { moveTo(30f, 108f); lineTo(80f, 160f); lineTo(172f, 42f) }, paint)
+                        } else {
+                            c.drawLine(42f, 42f, 158f, 158f, paint)
+                            c.drawLine(158f, 42f, 42f, 158f, paint)
+                        }
+                    }
+                }
+                Stamp.Text, Stamp.Date -> {
+                    val clean = text.replace(Regex("\\s+"), " ").trim().take(MAX_STAMP_CHARS)
+                    if (clean.isEmpty()) return@withContext null
+                    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = ink
+                        textSize = 110f
+                        typeface = android.graphics.Typeface.SANS_SERIF
+                    }
+                    val fm = paint.fontMetrics
+                    val pad = 16f
+                    val w = (paint.measureText(clean) + pad * 2).roundToInt().coerceIn(16, 4000)
+                    val h = (fm.descent - fm.ascent + pad * 2).roundToInt()
+                    createBitmap(w, h).also { b -> Canvas(b).drawText(clean, pad, pad - fm.ascent, paint) }
+                }
+            }
+            writePng(bmp)
+        }.onFailure { AppLog.e("Signature", "Making a stamp failed", it) }.getOrNull()
+    }
+
     /** Converts a legacy single-stroke signature (drawn on a 2.5:1 pad) into an image. */
     suspend fun fromLegacy(points: List<NormPoint>): String? =
         if (points.size < 2) null else saveDrawn(listOf(points), 1000f, 400f, 10f, 0xFF15171C.toInt())
@@ -155,6 +205,7 @@ class SignatureStore @Inject constructor(
     companion object {
         const val PREFIX = "png:"
         const val MAX_SAVED = 6
+        const val MAX_STAMP_CHARS = 60
         private const val MAX_IMPORT_SIDE = 1200
         private const val SWEEP_MIN_AGE_MS = 5 * 60_000L
         private val NAME = Regex("sig_[0-9_]+\\.png")

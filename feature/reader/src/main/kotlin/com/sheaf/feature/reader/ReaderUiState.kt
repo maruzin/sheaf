@@ -51,6 +51,9 @@ data class ReaderUiState(
     val signatureBusy: Boolean = false,
     /** Why the last signature photo couldn't be used; shown in the signature dialog with a retry. */
     val signatureImportError: String? = null,
+    /** The active placement is a stamp (date, tick, cross or text): its label, and its box height. */
+    val activeStamp: String? = null,
+    val activeStampHeight: Float? = null,
     val annotationsListVisible: Boolean = false,
     val annotationsByPage: Map<Int, List<Annotation>> = emptyMap(),
     val canUndo: Boolean = false,

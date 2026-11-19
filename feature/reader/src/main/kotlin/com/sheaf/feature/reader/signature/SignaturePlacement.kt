@@ -82,7 +82,10 @@ data class SignaturePlacement(
 
     companion object {
         const val DEFAULT_WIDTH = 0.36f
-        const val MIN_WIDTH = 0.06f
+        const val MIN_WIDTH = 0.03f
+        /** Stamp heights in page-width units: text about 6 mm tall on A4, a tick or cross about 9 mm. */
+        const val STAMP_TEXT_HEIGHT = 0.03f
+        const val STAMP_MARK_HEIGHT = 0.045f
         const val MAX_WIDTH = 1.2f
 
         fun of(annotation: Annotation): SignaturePlacement? {
@@ -100,9 +103,16 @@ data class SignaturePlacement(
          * A new placement centred on [at], [DEFAULT_WIDTH] wide (narrower on landscape pages), with the
          * image's own proportions ([imageAspect] = width / height).
          */
-        fun new(image: String, at: NormPoint, imageAspect: Float, pageAspect: Float): SignaturePlacement {
-            val ia = imageAspect.coerceIn(0.2f, 12f)
-            var w = DEFAULT_WIDTH
+        fun new(
+            image: String,
+            at: NormPoint,
+            imageAspect: Float,
+            pageAspect: Float,
+            /** A stamp's box height in page-width units (sized for form boxes); null = signature size. */
+            height: Float? = null,
+        ): SignaturePlacement {
+            val ia = imageAspect.coerceIn(0.2f, 40f)
+            var w = height?.let { (it * ia).coerceIn(MIN_WIDTH, MAX_WIDTH) } ?: DEFAULT_WIDTH
             // Keep it shorter than a third of the page on wide or landscape pages.
             val maxH = pageAspect.coerceAtLeast(0.1f) / 3f
             if (w / ia > maxH) w = maxH * ia

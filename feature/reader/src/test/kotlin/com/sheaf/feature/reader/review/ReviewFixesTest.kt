@@ -98,4 +98,17 @@ class ReviewFixesTest {
         val far = SignatureGestures.hitTest(list, 1L, 470f - 28f, 697f - 28f, 1000f, 1414f, handleRadius = 20f, minTouchRadius = 48f)
         assertTrue(far?.part != SignatureGestures.Part.Delete)
     }
+
+    @Test
+    fun `stamps are sized for form boxes, not signature lines`() {
+        val tick = SignaturePlacement.new("sig_1.png", NormPoint(0.5f, 0.5f), 1f, a4, SignaturePlacement.STAMP_MARK_HEIGHT)
+        assertEquals(SignaturePlacement.STAMP_MARK_HEIGHT, tick.h, 1e-4f)
+        assertEquals(tick.w, tick.h, 1e-4f)
+        val date = SignaturePlacement.new("sig_2.png", NormPoint(0.5f, 0.5f), 5.5f, a4, SignaturePlacement.STAMP_TEXT_HEIGHT)
+        assertEquals(SignaturePlacement.STAMP_TEXT_HEIGHT, date.h, 1e-4f)
+        assertTrue(date.w < SignaturePlacement.DEFAULT_WIDTH)
+        // A tick resized smaller stays usable (no jump to a bigger minimum).
+        val smaller = SignatureGestures.nudge(tick, Nudge.Smaller, a4)
+        assertTrue(smaller.w < tick.w)
+    }
 }

@@ -138,7 +138,13 @@ class ReaderViewModel @Inject constructor(
                 _state.update { it.copy(reflowScale = event.scale.coerceIn(MIN_REFLOW_SCALE, MAX_REFLOW_SCALE)) }
             is ReaderEvent.CloseTab -> viewModelScope.launch { openTabs.close(event.documentId) }
             ReaderEvent.ToggleAnnotate -> _state.update {
-                it.copy(annotating = !it.annotating, signatureMode = false, selectedSignatureId = null)
+                // Leaving markup ends a stamping run: next time Sign starts with your signature again.
+                val fromStamp = it.activeStamp != null
+                it.copy(
+                    annotating = !it.annotating, signatureMode = false, selectedSignatureId = null,
+                    activeStamp = null, activeStampHeight = null,
+                    activeSignature = if (fromStamp) it.savedSignatures.firstOrNull() else it.activeSignature,
+                )
             }
             ReaderEvent.Undo -> stepHistory(undo = true)
             ReaderEvent.Redo -> stepHistory(undo = false)
@@ -901,7 +907,9 @@ class ReaderViewModel @Inject constructor(
         _state.update {
             it.copy(
                 savedSignatures = names,
-                activeSignature = it.activeSignature?.takeIf { a -> a in names } ?: names.firstOrNull(),
+                // A stamp stays the active placement until the user picks a signature again.
+                activeSignature = if (it.activeStamp != null) it.activeSignature
+                else it.activeSignature?.takeIf { a -> a in names } ?: names.firstOrNull(),
             )
         }
         loadSignatureImages(names)
@@ -971,6 +979,8 @@ class ReaderViewModel @Inject constructor(
                 signatureBusy = false,
                 savedSignatures = names.distinct().take(SignatureStore.MAX_SAVED),
                 activeSignature = name,
+                activeStamp = null,
+                activeStampHeight = null,
                 annotating = true,
                 signatureMode = true,
                 noteMode = false,
@@ -983,14 +993,71 @@ class ReaderViewModel @Inject constructor(
 
     private fun chooseSignature(name: String) {
         if (name !in _state.value.savedSignatures) return
-        _state.update { it.copy(activeSignature = name, annotating = true, signatureMode = true, selectedSignatureId = null) }
+        _state.update {
+            it.copy(
+                activeSignature = name, activeStamp = null, activeStampHeight = null,
+                annotating = true, signatureMode = true, selectedSignatureId = null,
+            )
+        }
+    }
+
+    /**
+     * Makes a fill-and-sign stamp and gets ready to place it: today's date (in the phone's own date
+     * order, with a 4-digit year), a tick, a cross, or [text]. It stays active, so several boxes can
+     * be ticked in a row.
+     */
+    fun makeStamp(kind: SignatureStore.Stamp, text: String = "") {
+        viewModelScope.launch {
+            _state.update { it.copy(signatureBusy = true) }
+            val label: String
+            val content: String
+            when (kind) {
+                SignatureStore.Stamp.Date -> { content = todayForForms(); label = "Date" }
+                SignatureStore.Stamp.Tick -> { content = ""; label = "Tick" }
+                SignatureStore.Stamp.Cross -> { content = ""; label = "Cross" }
+                SignatureStore.Stamp.Text -> { content = text.trim(); label = text.trim() }
+            }
+            val name = signatures.saveStamp(kind, content)
+            if (name == null) {
+                _state.update { it.copy(signatureBusy = false, billingMessage = "Couldn't make that stamp") }
+                return@launch
+            }
+            signatures.load(name)?.let { bmp -> _state.update { it.copy(signatureImages = it.signatureImages + (name to bmp)) } }
+            val height = if (kind == SignatureStore.Stamp.Tick || kind == SignatureStore.Stamp.Cross) {
+                SignaturePlacement.STAMP_MARK_HEIGHT
+            } else {
+                SignaturePlacement.STAMP_TEXT_HEIGHT
+            }
+            _state.update {
+                it.copy(
+                    signatureBusy = false,
+                    activeSignature = name,
+                    activeStamp = label,
+                    activeStampHeight = height,
+                    annotating = true,
+                    signatureMode = true,
+                    noteMode = false,
+                    selectedSignatureId = null,
+                )
+            }
+        }
+    }
+
+    private fun todayForForms(): String {
+        val locale = java.util.Locale.getDefault()
+        val pattern = android.text.format.DateFormat.getBestDateTimePattern(locale, "ddMMyyyy")
+        return java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern(pattern, locale))
     }
 
     /** Removes a signature from the saved list. Documents already signed with it keep it. */
     private fun forgetSignature(name: String) {
         val names = _state.value.savedSignatures - name
         _state.update {
-            it.copy(savedSignatures = names, activeSignature = it.activeSignature?.takeIf { a -> a != name } ?: names.firstOrNull())
+            it.copy(
+                savedSignatures = names,
+                activeSignature = if (it.activeStamp != null) it.activeSignature
+                else it.activeSignature?.takeIf { a -> a != name } ?: names.firstOrNull(),
+            )
         }
         viewModelScope.launch {
             runCatching { settings.setSignature(SignatureStore.encodeList(names)) }
@@ -1007,7 +1074,7 @@ class ReaderViewModel @Inject constructor(
         val id = _state.value.documentId ?: return
         val image = _state.value.activeSignature ?: return
         viewModelScope.launch {
-            val placement = SignaturePlacement.new(image, at, signatures.aspect(image), pageAspect)
+            val placement = SignaturePlacement.new(image, at, signatures.aspect(image), pageAspect, _state.value.activeStampHeight)
             historyMutex.withLock {
                 val annotation = placement.toAnnotation(id, pageIndex)
                 val newId = runCatching { annotationRepo.upsert(annotation) }.getOrNull() ?: return@withLock

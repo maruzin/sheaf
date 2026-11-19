@@ -4,6 +4,29 @@ Running engineering log. Newest first. Every non-obvious decision gets one line 
 
 ---
 
+## 1.3.0 (versionCode 11), 2026-11-19: fill-and-sign stamps, extract pages
+Top two items from the 1.2.0 review roadmap.
+- **Stamps** (signing bar, always visible, free): today's date (the phone's own date order with a 4-digit
+  year, from `getBestDateTimePattern(locale, "ddMMyyyy")`), tick, cross, or your own text (up to 60
+  characters). Each is rendered to a transparent PNG by `SignatureStore.saveStamp` and placed as a
+  Signature annotation, so moving, resizing, turning, the TalkBack buttons, undo, flattening and every
+  export work unchanged. Ticks and crosses are drawn paths (fonts may lack the glyphs). Stamps are sized
+  for form boxes (`STAMP_TEXT_HEIGHT` 0.03, `STAMP_MARK_HEIGHT` 0.045 of page width; `MIN_WIDTH` lowered
+  to 0.03 so a tick can be resized smaller without jumping).
+- **Stamping runs:** a stamp stays active, and a tap on empty page places another even while one is
+  selected (signatures still deselect), so ticking five boxes is five taps. Done ends the run.
+- **Sign without a signature:** the Sign button always enters signing; with no signature yet it also
+  opens the dialog, and Cancel leaves the stamps ready (before, Cancel left signing mode, so stamps were
+  unreachable until a signature existed).
+- **Stable bar:** the adjust row is always shown (disabled until something is selected); showing it
+  only on selection made the page jump under the finger and the next tap land in the wrong place.
+- **Extract pages** (Manage pages → Select → Extract): the ticked pages, in their current order and
+  rotation, become a new library PDF "Name (pages 2-4, 7).pdf" via the existing fresh-document writer
+  (links, bookmarks and form flattening handled as in Save copy); markup on those pages comes along.
+- Fixes found on the way: library list said "1 pages".
+- Tests: 106 unit (3 new: page-range naming, stamp sizing, stamp rendering), 11/11 device (2 new:
+  stamps without a saved signature, extract pages), hands-on check of date, tick and cross placement.
+
 ## 1.2.0 (versionCode 10), 2026-11-19: review pass (code, security, accessibility)
 Four independent reviews of the vc9 change set (code correctness, security, accessibility, competitor scan)
 before upload. Every confirmed finding fixed; vc9 was never uploaded.
